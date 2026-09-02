@@ -156,7 +156,7 @@ func (m Model) renderDetailsPanel(width, height int) string {
 	if description == "" {
 		description = "No description provided."
 	}
-	lines = append(lines, wrapText(description, innerWidth)...)
+	lines = append(lines, renderMarkdown(description, innerWidth)...)
 	return panel("Details", width, height, fitLines(lines, innerHeight))
 }
 

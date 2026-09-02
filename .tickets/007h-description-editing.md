@@ -27,4 +27,6 @@ Edit a multiline Markdown issue description without leaving Tuinear.
 - [x] Optimistic display, exact rollback, and draft preservation across a
   background refresh are tested.
 - [x] Confirmed descriptions persist through the existing normalized cache.
+- [x] Render stored Markdown descriptions with terminal-aware formatting and
+  wrapping while keeping the editor's source text exact.
 - [x] Demo mode uses the same editor and mutation path.

@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 func Open(path string) (*Store, error) {
 	path = strings.TrimSpace(path)
@@ -135,7 +135,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		if _, err := tx.ExecContext(ctx, createTeamProjectsTable); err != nil {
 			return fmt.Errorf("add team projects: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 3"); err != nil {
 			return fmt.Errorf("set cache schema version: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -154,7 +154,24 @@ func migrate(ctx context.Context, db *sql.DB) error {
 				return fmt.Errorf("add editable label metadata: %w", err)
 			}
 		}
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 4"); err != nil {
+			return fmt.Errorf("set cache schema version: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit cache migration: %w", err)
+		}
+		version = 4
+	}
+	if version == 4 {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin cache migration: %w", err)
+		}
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(ctx, createIssueFilterPreferencesTable); err != nil {
+			return fmt.Errorf("add saved issue filters: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 5"); err != nil {
 			return fmt.Errorf("set cache schema version: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -255,6 +272,7 @@ var schemaStatements = []string{
         PRIMARY KEY (account_key, issue_id, label_id),
         FOREIGN KEY (account_key) REFERENCES snapshots(account_key) ON DELETE CASCADE
     )`,
+	createIssueFilterPreferencesTable,
 }
 
 var schemaValidationQueries = []string{
@@ -270,6 +288,7 @@ var schemaValidationQueries = []string{
 	"SELECT account_key, label_id, position FROM workspace_labels LIMIT 0",
 	"SELECT account_key, team_id, label_id, position FROM team_labels LIMIT 0",
 	"SELECT account_key, issue_id, label_id, position FROM issue_labels LIMIT 0",
+	"SELECT profile_key, filters_json FROM issue_filter_preferences LIMIT 0",
 }
 
 const createTeamWorkflowStatesTable = `CREATE TABLE team_workflow_states (
@@ -308,6 +327,11 @@ const createTeamLabelsTable = `CREATE TABLE team_labels (
         PRIMARY KEY (account_key, team_id, label_id),
         FOREIGN KEY (account_key, team_id) REFERENCES teams(account_key, id) ON DELETE CASCADE,
         FOREIGN KEY (account_key, label_id) REFERENCES labels(account_key, id) ON DELETE CASCADE
+    )`
+
+const createIssueFilterPreferencesTable = `CREATE TABLE issue_filter_preferences (
+        profile_key TEXT PRIMARY KEY,
+        filters_json TEXT NOT NULL
     )`
 
 func quarantine(path string) (string, error) {

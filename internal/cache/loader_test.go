@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jihmy/tuinear/internal/issuefilter"
 	"github.com/jihmy/tuinear/internal/linear"
 )
 
@@ -314,5 +315,21 @@ func TestLoaderKeepsCacheWhenArchiveFails(t *testing.T) {
 	cached, _, err := store.Load(t.Context(), "work")
 	if err != nil || len(cached.Issues) != len(dashboard.Issues) {
 		t.Fatalf("failed archive changed cache: %d issues, %v", len(cached.Issues), err)
+	}
+}
+
+func TestLoaderIgnoresStaleFilterSaveRevision(t *testing.T) {
+	store := openTestStore(t)
+	loader := NewLoader(store, &remoteStub{}, func() (string, error) { return "work", nil })
+	newer := issuefilter.State{ExcludedStatuses: []string{"completed", "canceled"}}
+	if err := loader.SaveIssueFilters(t.Context(), "profile:work", newer, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := loader.SaveIssueFilters(t.Context(), "profile:work", issuefilter.State{Status: "Todo"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loader.LoadIssueFilters(t.Context(), "profile:work")
+	if err != nil || got.Status != "" || len(got.ExcludedStatuses) != 2 {
+		t.Fatalf("filters after stale save = %#v, %v", got, err)
 	}
 }

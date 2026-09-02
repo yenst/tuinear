@@ -43,38 +43,44 @@ type issueBrowserFailedMsg struct{ err error }
 type BrowserOpener func(string) error
 
 type Model struct {
-	loader            DashboardLoader
-	dashboard         linear.Dashboard
-	issues            []linear.Issue
-	teamIndex         int
-	selected          int
-	query             string
-	filters           IssueFilters
-	searching         bool
-	palette           bool
-	paletteIdx        int
-	width             int
-	height            int
-	loading           bool
-	err               error
-	lastLoaded        time.Time
-	fromCache         bool
-	cachedAt          time.Time
-	refreshing        bool
-	refreshErr        error
-	browserOpen       BrowserOpener
-	browserErr        error
-	issueUpdater      IssueUpdater
-	issueArchiver     IssueArchiver
-	editor            *titleEditor
-	choiceEditor      *choiceEditor
-	labelEditor       *labelEditor
-	descriptionEditor *descriptionEditor
-	archiveConfirm    *archiveConfirmation
-	actionMenu        *actionMenu
-	pendingEdit       *pendingIssueEdit
-	pendingArchive    *pendingIssueArchive
-	editErr           error
+	loader                   DashboardLoader
+	dashboard                linear.Dashboard
+	issues                   []linear.Issue
+	teamIndex                int
+	selected                 int
+	query                    string
+	filters                  IssueFilters
+	searching                bool
+	palette                  bool
+	paletteIdx               int
+	width                    int
+	height                   int
+	loading                  bool
+	err                      error
+	lastLoaded               time.Time
+	fromCache                bool
+	cachedAt                 time.Time
+	refreshing               bool
+	refreshErr               error
+	browserOpen              BrowserOpener
+	browserErr               error
+	issueUpdater             IssueUpdater
+	issueArchiver            IssueArchiver
+	editor                   *titleEditor
+	choiceEditor             *choiceEditor
+	labelEditor              *labelEditor
+	descriptionEditor        *descriptionEditor
+	archiveConfirm           *archiveConfirmation
+	actionMenu               *actionMenu
+	pendingEdit              *pendingIssueEdit
+	pendingArchive           *pendingIssueArchive
+	editErr                  error
+	filterStore              IssueFilterStore
+	filterProfileKey         string
+	filterPreferencesLoading bool
+	filterPreferencesLoaded  bool
+	filterRevision           uint64
+	filterErr                error
 }
 
 func New(loader DashboardLoader) Model {
@@ -84,6 +90,9 @@ func New(loader DashboardLoader) Model {
 	}
 	if archiver, ok := loader.(IssueArchiver); ok {
 		m.issueArchiver = archiver
+	}
+	if store, ok := loader.(IssueFilterStore); ok {
+		m.filterStore = store
 	}
 	return m
 }
@@ -118,40 +127,6 @@ func NewWithDashboardAndBrowser(dashboard linear.Dashboard, opener BrowserOpener
 	return m
 }
 
-func (m Model) Init() tea.Cmd {
-	if loader, ok := m.loader.(CachedDashboardLoader); ok {
-		return loadCachedDashboard(loader)
-	}
-	return loadDashboard(m.loader)
-}
-
-func loadCachedDashboard(loader CachedDashboardLoader) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		dashboard, cachedAt, err := loader.LoadCachedDashboard(ctx)
-		if err != nil {
-			return cachedDashboardUnavailableMsg{err: err}
-		}
-		return cachedDashboardLoadedMsg{dashboard: dashboard, cachedAt: cachedAt}
-	}
-}
-
-func loadDashboard(loader DashboardLoader) tea.Cmd {
-	return func() tea.Msg {
-		if loader == nil {
-			return dashboardFailedMsg{err: fmt.Errorf("dashboard loader is not configured")}
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-		defer cancel()
-		dashboard, err := loader.FetchDashboard(ctx)
-		if err != nil {
-			return dashboardFailedMsg{err: err}
-		}
-		return dashboardLoadedMsg{dashboard: dashboard}
-	}
-}
-
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -160,19 +135,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case dashboardLoadedMsg:
 		m.applyDashboard(msg.dashboard)
+		m.syncIssueFilterProfile()
 		m.rebaseOpenEditors()
 		m.rebasePendingIssueEdit()
 		m.fromCache = false
 		m.cachedAt = time.Time{}
 		m.refreshing = false
 		m.refreshErr = nil
-		return m, nil
+		return m, m.loadIssueFilters()
 	case cachedDashboardLoadedMsg:
 		m.applyDashboard(msg.dashboard)
+		m.syncIssueFilterProfile()
 		m.fromCache = true
 		m.cachedAt = msg.cachedAt
 		m.refreshing = true
 		m.refreshErr = nil
+		filterCmd := m.loadIssueFilters()
+		if filterCmd != nil {
+			return m, tea.Batch(loadDashboard(m.loader), filterCmd)
+		}
 		return m, loadDashboard(m.loader)
 	case cachedDashboardUnavailableMsg:
 		return m, loadDashboard(m.loader)
@@ -204,6 +185,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case issueArchiveFailedMsg:
 		m.failIssueArchive(msg.issueID, msg.err)
 		return m, nil
+	case issueFiltersLoadedMsg:
+		m.finishIssueFilterLoad(msg)
+		return m, nil
+	case issueFiltersSavedMsg:
+		m.finishIssueFilterSave(msg)
+		return m, nil
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -230,8 +217,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.palette {
-			m.updatePalette(msg)
-			return m, nil
+			return m, m.updatePalette(msg)
 		}
 		if m.searching {
 			m.updateSearch(msg)
@@ -294,6 +280,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.hasFilters() {
 				m.filters = IssueFilters{}
 				m.filterIssues()
+				return m, m.saveIssueFilters()
 			}
 		case "j", "down":
 			m.moveSelection(1)

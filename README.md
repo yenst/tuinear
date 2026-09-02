@@ -10,7 +10,10 @@ field editing and recoverable issue archiving.
 - Vim and arrow-key navigation
 - Team filtering with `tab`, `[` and `]`
 - Incremental identifier/title search with `/`
-- Composable assignee, status, priority, and project filters via `f`
+- Composable assignee, status, priority, and project filters via `f`, persisted
+  independently for each Linear profile
+- Positive filters with `enter`, multiple `NOT` filters with `!`, an explicit
+  **Me** assignee, and an **Active** status preset
 - Loading, empty, and actionable error states
 - Manual refresh with `r`
 - Demo and snapshot modes that need no Linear account
@@ -26,6 +29,8 @@ field editing and recoverable issue archiving.
 - Move the selected issue into or out of a team project with `P`
 - Apply or clear multiple labels with `l`
 - Edit multiline descriptions with `d`
+- Render issue descriptions as width-aware Markdown in the detail pane while
+  preserving the original Markdown source in the editor
 - Archive the selected issue with `x` after a focused confirmation that
   defaults to cancellation
 
@@ -94,6 +99,8 @@ the background. The header marks cached or offline data and shows its age. A
 successful refresh atomically replaces that account's snapshot; a failed
 refresh leaves the last-known-good tickets available. Corrupt or incompatible
 cache files are quarantined with a `.broken-<timestamp>` suffix and rebuilt.
+Active filters are stored separately for each profile, so they survive both
+dashboard refreshes and application restarts without crossing accounts.
 
 For development, `LINEAR_API_KEY` remains available as an explicit override.
 Demo mode does not need credentials: `go run ./cmd/tuinear --demo`.
@@ -125,7 +132,9 @@ go run ./cmd/tuinear --snapshot
 | `d` | Edit the selected issue's multiline description |
 | `x` | Confirm and archive the selected issue (recoverable) |
 | `/` | Incremental search by identifier or title |
-| `f` / `ctrl+f` | Open the discoverable filter palette |
+| `f` / `ctrl+f` | Open the persistent filter palette |
+| `enter` in filters | Include the selected value, choose a preset, or clear |
+| `!` in filters | Toggle the selected value as a `NOT` exclusion |
 | `space` | Open the selected issue in the default browser |
 | `esc` | Clear an active search/filter, or close search/palette |
 | `r` | Refresh |

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jihmy/tuinear/internal/issuefilter"
 	"github.com/jihmy/tuinear/internal/linear"
 )
 
@@ -35,11 +36,13 @@ type DashboardDecorator interface {
 type KeyFunc func() (string, error)
 
 type Loader struct {
-	store    *Store
-	remote   DashboardLoader
-	key      KeyFunc
-	now      func() time.Time
-	remoteMu sync.Mutex
+	store           *Store
+	remote          DashboardLoader
+	key             KeyFunc
+	now             func() time.Time
+	remoteMu        sync.Mutex
+	filterMu        sync.Mutex
+	filterRevisions map[string]uint64
 }
 
 func NewLoader(store *Store, remote DashboardLoader, key KeyFunc) *Loader {
@@ -162,6 +165,32 @@ func (l *Loader) ArchiveIssue(ctx context.Context, issueID string) error {
 	}
 	dashboard.Issues = issues
 	l.saveBestEffort(ctx, dashboard)
+	return nil
+}
+
+func (l *Loader) LoadIssueFilters(ctx context.Context, profileKey string) (issuefilter.State, error) {
+	if l == nil || l.store == nil {
+		return issuefilter.State{}, errors.New("cache loader is not configured")
+	}
+	return l.store.LoadIssueFilters(ctx, profileKey)
+}
+
+func (l *Loader) SaveIssueFilters(ctx context.Context, profileKey string, filters issuefilter.State, revision uint64) error {
+	if l == nil || l.store == nil {
+		return errors.New("cache loader is not configured")
+	}
+	l.filterMu.Lock()
+	defer l.filterMu.Unlock()
+	if l.filterRevisions == nil {
+		l.filterRevisions = make(map[string]uint64)
+	}
+	if revision < l.filterRevisions[profileKey] {
+		return nil
+	}
+	if err := l.store.SaveIssueFilters(ctx, profileKey, filters); err != nil {
+		return err
+	}
+	l.filterRevisions[profileKey] = revision
 	return nil
 }
 

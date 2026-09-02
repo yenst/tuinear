@@ -118,6 +118,29 @@ func TestDescriptionEditorUnchangedDoesNotMutate(t *testing.T) {
 	}
 }
 
+func TestDescriptionEditorPreservesMarkdownSource(t *testing.T) {
+	dashboard := editorDashboard(t)
+	source := "# Heading\n\n- **Keep** this [link](https://linear.app)\n"
+	dashboard.Issues[0].Description = source
+	updater := &issueUpdaterStub{issue: dashboard.Issues[0]}
+	m := NewWithDashboardAndUpdater(dashboard, updater)
+	m = updateKey(m, textKey("d"))
+	if got := string(m.descriptionEditor.value); got != source {
+		t.Fatalf("editor source = %q, want %q", got, source)
+	}
+	m = updateKey(m, textKey("!"))
+	updated, cmd := m.Update(textKey("ctrl+s"))
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("save command is nil")
+	}
+	updated, _ = m.Update(cmd())
+	m = updated.(Model)
+	if got := *updater.update.Description; got != source+"!" {
+		t.Fatalf("submitted description = %q, want %q", got, source+"!")
+	}
+}
+
 func TestDescriptionEditorCursorAndViewport(t *testing.T) {
 	value := []rune("one\ntwo\nthree")
 	if got := verticalCursor(value, 6, -1); got != 2 {

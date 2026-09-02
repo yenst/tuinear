@@ -153,7 +153,7 @@ func TestOpenMigratesVersionOneDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range schemaStatements {
-		if statement == createTeamWorkflowStatesTable || statement == createTeamProjectsTable || statement == createWorkspaceLabelsTable || statement == createTeamLabelsTable {
+		if statement == createTeamWorkflowStatesTable || statement == createTeamProjectsTable || statement == createWorkspaceLabelsTable || statement == createTeamLabelsTable || statement == createIssueFilterPreferencesTable {
 			continue
 		}
 		if _, err := db.Exec(statement); err != nil {
@@ -199,7 +199,7 @@ func TestOpenMigratesVersionTwoDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range schemaStatements {
-		if statement == createTeamProjectsTable || statement == createWorkspaceLabelsTable || statement == createTeamLabelsTable {
+		if statement == createTeamProjectsTable || statement == createWorkspaceLabelsTable || statement == createTeamLabelsTable || statement == createIssueFilterPreferencesTable {
 			continue
 		}
 		if _, err := db.Exec(statement); err != nil {
@@ -239,7 +239,7 @@ func TestOpenMigratesVersionThreeDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range schemaStatements {
-		if statement == createWorkspaceLabelsTable || statement == createTeamLabelsTable {
+		if statement == createWorkspaceLabelsTable || statement == createTeamLabelsTable || statement == createIssueFilterPreferencesTable {
 			continue
 		}
 		if _, err := db.Exec(statement); err != nil {
@@ -269,6 +269,43 @@ func TestOpenMigratesVersionThreeDatabase(t *testing.T) {
 	}
 	if _, err := store.db.Exec("SELECT * FROM team_labels LIMIT 0"); err != nil {
 		t.Fatalf("team labels table missing: %v", err)
+	}
+}
+
+func TestOpenMigratesVersionFourDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.sqlite3")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range schemaStatements {
+		if statement == createIssueFilterPreferencesTable {
+			continue
+		}
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = 4"); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var version int
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("migrated version = %d, %v", version, err)
+	}
+	if _, err := store.db.Exec("SELECT * FROM issue_filter_preferences LIMIT 0"); err != nil {
+		t.Fatalf("issue filter preferences table missing: %v", err)
 	}
 }
 

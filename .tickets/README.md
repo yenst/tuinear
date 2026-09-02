@@ -11,7 +11,7 @@ empty states are handled.
 | [003](003-issue-browser.md) | DONE | Browse tickets and inspect details |
 | [006](006-oauth-login.md) | DONE | Browser-based sign-in and secure storage |
 | [006a](006a-multi-account-profiles.md) | DONE | Keep work/personal workspace-user profiles connected |
-| [004](004-search-and-filters.md) | DONE | Quickly narrow a large workspace |
+| [004](004-search-and-filters.md) | DONE | Persist inclusive and negative filters per profile |
 | [005](005-persistent-cache.md) | DONE | Instant and offline startup |
 | [009](009-open-issue-browser.md) | DONE | Open the selected issue in the default browser |
 | [007](007-editing.md) | DONE | Edit safe issue fields |

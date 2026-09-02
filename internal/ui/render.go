@@ -138,7 +138,7 @@ func (m Model) renderSearchBar(width int) string {
 }
 
 func (m Model) activeFilters() []string {
-	active := make([]string, 0, 4)
+	active := make([]string, 0, 8)
 	if m.filters.Assignee != "" {
 		active = append(active, "assignee="+m.filterDisplayValue(filterAssignee, m.filters.Assignee))
 	}
@@ -151,6 +151,18 @@ func (m Model) activeFilters() []string {
 	if m.filters.Project != "" {
 		active = append(active, "project="+m.filterDisplayValue(filterProject, m.filters.Project))
 	}
+	for _, value := range m.filters.ExcludedAssignees {
+		active = append(active, "assignee≠"+m.filterDisplayValue(filterAssignee, value))
+	}
+	for _, value := range m.filters.ExcludedStatuses {
+		active = append(active, "status≠"+m.filterDisplayValue(filterStatus, value))
+	}
+	for _, value := range m.filters.ExcludedPriorities {
+		active = append(active, "priority≠"+m.filterDisplayValue(filterPriority, value))
+	}
+	for _, value := range m.filters.ExcludedProjects {
+		active = append(active, "project≠"+m.filterDisplayValue(filterProject, value))
+	}
 	return active
 }
 
@@ -160,7 +172,8 @@ func (m Model) filterDisplayValue(field filterField, value string) string {
 	}
 	for _, option := range m.valuesFor(field) {
 		if option.value == value {
-			return strings.TrimPrefix(option.label, filterFieldName(field)+": ")
+			display := strings.TrimPrefix(option.label, filterFieldName(field)+": ")
+			return strings.TrimPrefix(display, "NOT ")
 		}
 	}
 	return value
@@ -169,7 +182,7 @@ func (m Model) filterDisplayValue(field filterField, value string) string {
 func (m Model) renderFilterPalette(width, height int) string {
 	innerHeight := max(1, height-3)
 	options := m.filterOptions()
-	lines := []string{"Filter palette", mutedStyle.Render("Choose a value; filters compose. esc closes."), ""}
+	lines := []string{"Filter palette", mutedStyle.Render("enter includes/clears · ! toggles NOT · esc closes"), ""}
 	capacity := max(1, innerHeight-len(lines))
 	start := 0
 	if m.paletteIdx >= capacity {
@@ -221,6 +234,10 @@ func (m Model) renderFooter(width int) string {
 		help := "enter choose  ·  esc cancel  ·  j/k or arrows move  ·  e/s/p/u/P/l/d/space/x quick action"
 		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
 	}
+	if m.palette {
+		help := "enter include/clear  ·  ! toggle NOT  ·  j/k or arrows choose  ·  esc close"
+		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+	}
 	if m.editErr != nil {
 		help := "Action: " + m.editErr.Error() + "  ·  retry with e/s/p/u/P/l/d/x"
 		return lipgloss.NewStyle().Foreground(theme.red).Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
@@ -228,6 +245,10 @@ func (m Model) renderFooter(width int) string {
 	if m.browserErr != nil {
 		help := "Browser: " + m.browserErr.Error() + "  ·  space retries"
 		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+	}
+	if m.filterErr != nil {
+		help := "Filters: " + m.filterErr.Error() + "  ·  change a filter to retry saving"
+		return lipgloss.NewStyle().Foreground(theme.red).Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
 	}
 	help := "enter actions  ·  e title  ·  s status  ·  p priority  ·  u assignee  ·  P project  ·  l labels  ·  d description  ·  x archive  ·  space open  ·  / search  ·  f filters  ·  j/k move  ·  tab team  ·  a account  ·  r refresh  ·  q quit"
 	if width < 96 {
