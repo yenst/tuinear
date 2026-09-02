@@ -15,19 +15,26 @@ import (
 
 const DefaultEndpoint = "https://api.linear.app/graphql"
 
-const dashboardQuery = `query TuinearDashboard($first: Int!) {
+const dashboardWorkspaceQuery = `query TuinearDashboardWorkspace($first: Int!) {
   viewer { id name displayName email }
   organization { id name urlKey }
   users(first: $first) { nodes { id name displayName } }
-	issueLabels(first: $first) { nodes { id name color } }
-  teams {
-    nodes {
-      id key name
-      states { nodes { id name type color position } }
-	  projects(first: $first) { nodes { id name } }
-	  labels { nodes { id name color } }
-    }
+  issueLabels(first: $first) { nodes { id name color } }
+}`
+
+const dashboardTeamsQuery = `query TuinearDashboardTeams($first: Int!) {
+  teams(first: $first) { nodes { id key name } }
+}`
+
+const dashboardTeamDetailsQuery = `query TuinearDashboardTeamDetails($teamID: String!, $first: Int!, $nestedFirst: Int!) {
+  team(id: $teamID) {
+    states(first: $nestedFirst) { nodes { id name type color position } }
+    projects(first: $first) { nodes { id name } }
+    labels(first: $nestedFirst) { nodes { id name color } }
   }
+}`
+
+const dashboardIssuesQuery = `query TuinearDashboardIssues($first: Int!, $nestedFirst: Int!) {
   issues(first: $first, orderBy: updatedAt) {
     nodes {
       id identifier title description priority url createdAt updatedAt
@@ -35,7 +42,7 @@ const dashboardQuery = `query TuinearDashboard($first: Int!) {
       assignee { id name displayName }
       team { id key name }
       project { id name }
-      labels { nodes { id name color } }
+      labels(first: $nestedFirst) { nodes { id name color } }
     }
   }
 }`
@@ -116,24 +123,26 @@ type graphQLError struct {
 	Message string `json:"message"`
 }
 
+type dashboardTeamData struct {
+	ID     string `json:"id"`
+	Key    string `json:"key"`
+	Name   string `json:"name"`
+	States struct {
+		Nodes []WorkflowState `json:"nodes"`
+	} `json:"states"`
+	Projects struct {
+		Nodes []Project `json:"nodes"`
+	} `json:"projects"`
+	Labels struct {
+		Nodes []Label `json:"nodes"`
+	} `json:"labels"`
+}
+
 type dashboardData struct {
 	Viewer       Viewer       `json:"viewer"`
 	Organization Organization `json:"organization"`
 	Teams        struct {
-		Nodes []struct {
-			ID     string `json:"id"`
-			Key    string `json:"key"`
-			Name   string `json:"name"`
-			States struct {
-				Nodes []WorkflowState `json:"nodes"`
-			} `json:"states"`
-			Projects struct {
-				Nodes []Project `json:"nodes"`
-			} `json:"projects"`
-			Labels struct {
-				Nodes []Label `json:"nodes"`
-			} `json:"labels"`
-		} `json:"nodes"`
+		Nodes []dashboardTeamData `json:"nodes"`
 	} `json:"teams"`
 	Users struct {
 		Nodes []User `json:"nodes"`
@@ -148,18 +157,38 @@ type dashboardData struct {
 
 func (c *Client) FetchDashboard(ctx context.Context) (Dashboard, error) {
 	var decoded dashboardData
-	if err := c.graphQL(ctx, dashboardQuery, map[string]any{"first": 100}, &decoded); err != nil {
-		return Dashboard{}, err
+	if err := c.graphQL(ctx, dashboardWorkspaceQuery, map[string]any{"first": 100}, &decoded); err != nil {
+		return Dashboard{}, fmt.Errorf("fetch Linear dashboard workspace: %w", err)
+	}
+	if err := c.graphQL(ctx, dashboardTeamsQuery, map[string]any{"first": 100}, &decoded); err != nil {
+		return Dashboard{}, fmt.Errorf("fetch Linear dashboard teams: %w", err)
+	}
+	teamDetails := make([]dashboardTeamData, 0, len(decoded.Teams.Nodes))
+	for _, team := range decoded.Teams.Nodes {
+		var details struct {
+			Team dashboardTeamData `json:"team"`
+		}
+		variables := map[string]any{"teamID": team.ID, "first": 100, "nestedFirst": 50}
+		if err := c.graphQL(ctx, dashboardTeamDetailsQuery, variables, &details); err != nil {
+			return Dashboard{}, fmt.Errorf("fetch Linear dashboard team metadata %s: %w", team.ID, err)
+		}
+		details.Team.ID = team.ID
+		details.Team.Key = team.Key
+		details.Team.Name = team.Name
+		teamDetails = append(teamDetails, details.Team)
+	}
+	if err := c.graphQL(ctx, dashboardIssuesQuery, map[string]any{"first": 100, "nestedFirst": 50}, &decoded); err != nil {
+		return Dashboard{}, fmt.Errorf("fetch Linear dashboard issues: %w", err)
 	}
 	issues := decoded.Issues.Nodes
 	for index := range issues {
 		issues[index].Normalize()
 	}
-	teams := make([]Team, 0, len(decoded.Teams.Nodes))
-	teamStates := make([]TeamWorkflowStates, 0, len(decoded.Teams.Nodes))
-	teamProjects := make([]TeamProjects, 0, len(decoded.Teams.Nodes))
-	teamLabels := make([]TeamLabels, 0, len(decoded.Teams.Nodes))
-	for _, team := range decoded.Teams.Nodes {
+	teams := make([]Team, 0, len(teamDetails))
+	teamStates := make([]TeamWorkflowStates, 0, len(teamDetails))
+	teamProjects := make([]TeamProjects, 0, len(teamDetails))
+	teamLabels := make([]TeamLabels, 0, len(teamDetails))
+	for _, team := range teamDetails {
 		sort.SliceStable(team.States.Nodes, func(i, j int) bool {
 			return team.States.Nodes[i].Position < team.States.Nodes[j].Position
 		})

@@ -173,8 +173,7 @@ func panelInnerSize(width, height int) (int, int) {
 func centeredState(width, height int, title, detail string) string {
 	content := lipgloss.JoinVertical(lipgloss.Center, brandStyle.Render(title),
 		mutedStyle.Width(max(20, width-10)).Align(lipgloss.Center).Render(detail))
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content,
-		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(theme.background)))
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }
 
 func field(label, value string, width int) string {

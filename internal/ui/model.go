@@ -26,6 +26,10 @@ type AccountSwitcher interface {
 	SwitchAccount(context.Context, string) (linear.Dashboard, error)
 }
 
+type CachedAccountSwitcher interface {
+	SwitchAccountCached(context.Context, string) (linear.Dashboard, time.Time, error)
+}
+
 type IssueUpdater interface {
 	UpdateIssue(context.Context, string, linear.IssueUpdate) (linear.Issue, error)
 }
@@ -37,6 +41,10 @@ type cachedDashboardLoadedMsg struct {
 	cachedAt  time.Time
 }
 type cachedDashboardUnavailableMsg struct{ err error }
+type accountDashboardLoadedMsg struct {
+	dashboard linear.Dashboard
+	cachedAt  time.Time
+}
 type issueBrowserOpenedMsg struct{}
 type issueBrowserFailedMsg struct{ err error }
 
@@ -53,6 +61,7 @@ type Model struct {
 	searching                bool
 	palette                  bool
 	paletteIdx               int
+	help                     bool
 	width                    int
 	height                   int
 	loading                  bool
@@ -157,6 +166,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, loadDashboard(m.loader)
 	case cachedDashboardUnavailableMsg:
 		return m, loadDashboard(m.loader)
+	case accountDashboardLoadedMsg:
+		m.applyDashboard(msg.dashboard)
+		m.syncIssueFilterProfile()
+		m.rebaseOpenEditors()
+		m.rebasePendingIssueEdit()
+		m.cachedAt = msg.cachedAt
+		m.fromCache = !msg.cachedAt.IsZero()
+		m.refreshing = m.fromCache
+		m.refreshErr = nil
+		filterCmd := m.loadIssueFilters()
+		if !m.fromCache {
+			return m, filterCmd
+		}
+		if filterCmd != nil {
+			return m, tea.Batch(loadDashboard(m.loader), filterCmd)
+		}
+		return m, loadDashboard(m.loader)
 	case dashboardFailedMsg:
 		preserveDashboard := m.fromCache || m.refreshing
 		m.loading = false
@@ -213,6 +239,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.actionMenu != nil {
 			return m, m.updateActionMenu(msg)
 		}
+		if m.help {
+			if keyMatches(msg, "h", "H", "shift+h", "?", "shift+/", "esc") {
+				m.help = false
+			}
+			return m, nil
+		}
 		if m.pendingArchive != nil {
 			return m, nil
 		}
@@ -223,10 +255,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateSearch(msg)
 			return m, nil
 		}
-		switch msg.String() {
-		case "q":
+		switch {
+		case keyMatches(msg, "q"):
 			return m, tea.Quit
-		case "r":
+		case keyMatches(msg, "r"):
 			if m.pendingEdit != nil {
 				return m, nil
 			}
@@ -238,42 +270,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = true
 			}
 			return m, loadDashboard(m.loader)
-		case "a":
+		case keyMatches(msg, "a"):
 			if m.pendingEdit != nil {
 				return m, nil
 			}
 			return m, m.cycleAccount(1)
-		case "A":
+		case keyMatches(msg, "A", "shift+a"):
 			if m.pendingEdit != nil {
 				return m, nil
 			}
 			return m, m.cycleAccount(-1)
-		case "/":
+		case keyMatches(msg, "h", "H", "shift+h", "?", "shift+/"):
+			m.help = true
+		case keyMatches(msg, "/"):
 			m.searching = true
-		case "f", "ctrl+f":
+		case keyMatches(msg, "f", "ctrl+f"):
 			m.palette = true
 			m.paletteIdx = 0
-		case "space", " ":
+		case keyMatches(msg, "space", " "):
 			return m, m.openSelectedIssue()
-		case "enter", "return":
+		case keyMatches(msg, "enter", "return"):
 			m.beginIssueActions()
-		case "e":
+		case keyMatches(msg, "e"):
 			m.beginTitleEdit()
-		case "s":
+		case keyMatches(msg, "s"):
 			m.beginStatusEdit()
-		case "p":
+		case keyMatches(msg, "p"):
 			m.beginPriorityEdit()
-		case "u":
+		case keyMatches(msg, "u"):
 			m.beginAssigneeEdit()
-		case "P":
+		case keyMatches(msg, "P", "shift+p"):
 			m.beginProjectEdit()
-		case "l":
+		case keyMatches(msg, "l"):
 			m.beginLabelEdit()
-		case "d":
+		case keyMatches(msg, "d"):
 			m.beginDescriptionEdit()
-		case "x":
+		case keyMatches(msg, "x"):
 			m.beginArchiveConfirmation()
-		case "esc":
+		case keyMatches(msg, "esc"):
 			if m.query != "" {
 				m.query = ""
 				m.filterIssues()
@@ -282,23 +316,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filterIssues()
 				return m, m.saveIssueFilters()
 			}
-		case "j", "down":
+		case keyMatches(msg, "j", "down"):
 			m.moveSelection(1)
-		case "k", "up":
+		case keyMatches(msg, "k", "up"):
 			m.moveSelection(-1)
-		case "g", "home":
+		case keyMatches(msg, "g", "home"):
 			m.selected = 0
-		case "G", "end":
+		case keyMatches(msg, "G", "shift+g", "end"):
 			if len(m.issues) > 0 {
 				m.selected = len(m.issues) - 1
 			}
-		case "tab", "]":
+		case keyMatches(msg, "tab", "]"):
 			m.cycleTeam(1)
-		case "shift+tab", "[":
+		case keyMatches(msg, "shift+tab", "["):
 			m.cycleTeam(-1)
 		}
 	}
 	return m, nil
+}
+
+func keyMatches(msg tea.KeyPressMsg, names ...string) bool {
+	text := msg.String()
+	keystroke := msg.Keystroke()
+	for _, name := range names {
+		if text == name || keystroke == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) openSelectedIssue() tea.Cmd {
@@ -391,8 +436,9 @@ func (m *Model) cycleAccount(delta int) tea.Cmd {
 	if m.loading || len(accounts) < 2 {
 		return nil
 	}
-	switcher, ok := m.loader.(AccountSwitcher)
-	if !ok {
+	switcher, canSwitch := m.loader.(AccountSwitcher)
+	cachedSwitcher, canSwitchCached := m.loader.(CachedAccountSwitcher)
+	if !canSwitch && !canSwitchCached {
 		return nil
 	}
 	current := -1
@@ -412,7 +458,23 @@ func (m *Model) cycleAccount(delta int) tea.Cmd {
 	}
 	m.loading = true
 	m.err = nil
+	m.refreshErr = nil
+	if canSwitchCached {
+		return switchAccountCached(cachedSwitcher, target)
+	}
 	return switchAccount(switcher, target)
+}
+
+func switchAccountCached(switcher CachedAccountSwitcher, accountID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		dashboard, cachedAt, err := switcher.SwitchAccountCached(ctx, accountID)
+		if err != nil {
+			return dashboardFailedMsg{err: err}
+		}
+		return accountDashboardLoadedMsg{dashboard: dashboard, cachedAt: cachedAt}
+	}
 }
 
 func switchAccount(switcher AccountSwitcher, accountID string) tea.Cmd {
@@ -469,6 +531,7 @@ func (m Model) selectedIssue() *linear.Issue {
 func (m Model) View() tea.View {
 	view := tea.NewView(m.render())
 	view.AltScreen = true
+	view.WindowTitle = "Tuinear"
 	return view
 }
 

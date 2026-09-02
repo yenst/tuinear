@@ -57,10 +57,42 @@ func (l *accountLoader) SwitchAccount(ctx context.Context, accountID string) (li
 	if l == nil || l.manager == nil {
 		return linear.Dashboard{}, fmt.Errorf("account loader is not configured")
 	}
-	if err := l.manager.SelectProfile(accountID); err != nil {
-		return linear.Dashboard{}, fmt.Errorf("select account: %w", err)
+	previousAccountID, err := l.ActiveAccountID()
+	if err != nil {
+		return linear.Dashboard{}, err
 	}
-	return l.FetchDashboard(ctx)
+	if err := l.SelectAccount(accountID); err != nil {
+		return linear.Dashboard{}, err
+	}
+	dashboard, err := l.FetchDashboard(ctx)
+	if err != nil {
+		if previousAccountID != "" {
+			_ = l.SelectAccount(previousAccountID)
+		}
+		return linear.Dashboard{}, err
+	}
+	return dashboard, nil
+}
+
+func (l *accountLoader) SelectAccount(accountID string) error {
+	if l == nil || l.manager == nil {
+		return fmt.Errorf("account loader is not configured")
+	}
+	if err := l.manager.SelectProfile(accountID); err != nil {
+		return fmt.Errorf("select account: %w", err)
+	}
+	return nil
+}
+
+func (l *accountLoader) ActiveAccountID() (string, error) {
+	if l == nil || l.manager == nil {
+		return "", fmt.Errorf("account loader is not configured")
+	}
+	accountID, err := l.manager.ActiveProfileID()
+	if err != nil {
+		return "", fmt.Errorf("load active account: %w", err)
+	}
+	return accountID, nil
 }
 
 func (l *accountLoader) UpdateIssue(ctx context.Context, issueID string, update linear.IssueUpdate) (linear.Issue, error) {

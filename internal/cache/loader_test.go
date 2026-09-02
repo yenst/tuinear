@@ -21,6 +21,20 @@ type remoteStub struct {
 	archiveErr error
 	archives   int
 	archivedID string
+	selectedID string
+	selectErr  error
+}
+
+func (s *remoteStub) SelectAccount(accountID string) error {
+	if s.selectErr != nil {
+		return s.selectErr
+	}
+	s.selectedID = accountID
+	return nil
+}
+
+func (s *remoteStub) ActiveAccountID() (string, error) {
+	return s.selectedID, nil
 }
 
 func (s *remoteStub) ArchiveIssue(_ context.Context, issueID string) error {
@@ -108,6 +122,70 @@ func TestLoaderPropagatesRemoteFailureWithoutReplacingCache(t *testing.T) {
 	got, _, err := store.Load(t.Context(), "work")
 	if err != nil || len(got.Issues) != len(cached.Issues) {
 		t.Fatalf("last-known-good cache changed: %d issues, %v", len(got.Issues), err)
+	}
+}
+
+func TestSwitchAccountCachedSelectsAndReturnsTargetWithoutNetwork(t *testing.T) {
+	store := openTestStore(t)
+	personal := demoDashboard(t)
+	personal.Organization.Name = "Personal cached"
+	personal.ActiveAccountID = "personal"
+	cachedAt := time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC)
+	if err := store.Save(t.Context(), "oauth:personal", personal, cachedAt); err != nil {
+		t.Fatal(err)
+	}
+	remote := &remoteStub{dashboard: demoDashboard(t), selectedID: "work"}
+	loader := NewLoader(store, remote, func() (string, error) {
+		return "oauth:" + remote.selectedID, nil
+	})
+
+	got, gotAt, err := loader.SwitchAccountCached(t.Context(), "personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Organization.Name != "Personal cached" || !gotAt.Equal(cachedAt) {
+		t.Fatalf("cached account = %q at %v", got.Organization.Name, gotAt)
+	}
+	if remote.selectedID != "personal" || remote.fetches != 0 {
+		t.Fatalf("selected = %q, remote fetches = %d", remote.selectedID, remote.fetches)
+	}
+}
+
+func TestSwitchAccountCachedFetchesWhenTargetHasNoSnapshot(t *testing.T) {
+	store := openTestStore(t)
+	fresh := demoDashboard(t)
+	fresh.Organization.Name = "Personal fresh"
+	fresh.ActiveAccountID = "personal"
+	remote := &remoteStub{dashboard: fresh, selectedID: "work"}
+	loader := NewLoader(store, remote, func() (string, error) {
+		return "oauth:" + remote.selectedID, nil
+	})
+
+	got, gotAt, err := loader.SwitchAccountCached(t.Context(), "personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Organization.Name != "Personal fresh" || !gotAt.IsZero() || remote.fetches != 1 {
+		t.Fatalf("fresh account = %q at %v, fetches = %d", got.Organization.Name, gotAt, remote.fetches)
+	}
+	stored, _, err := store.Load(t.Context(), "oauth:personal")
+	if err != nil || stored.Organization.Name != "Personal fresh" {
+		t.Fatalf("stored fresh account = %q, %v", stored.Organization.Name, err)
+	}
+}
+
+func TestSwitchAccountCachedRollsBackSelectionWhenUncachedFetchFails(t *testing.T) {
+	store := openTestStore(t)
+	remote := &remoteStub{err: errors.New("offline"), selectedID: "work"}
+	loader := NewLoader(store, remote, func() (string, error) {
+		return "oauth:" + remote.selectedID, nil
+	})
+
+	if _, _, err := loader.SwitchAccountCached(t.Context(), "personal"); err == nil {
+		t.Fatal("uncached offline switch unexpectedly succeeded")
+	}
+	if remote.selectedID != "work" {
+		t.Fatalf("failed switch left account %q selected", remote.selectedID)
 	}
 }
 

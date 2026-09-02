@@ -21,6 +21,11 @@ type AccountSwitcher interface {
 	SwitchAccount(context.Context, string) (linear.Dashboard, error)
 }
 
+type AccountSelector interface {
+	SelectAccount(string) error
+	ActiveAccountID() (string, error)
+}
+
 type IssueUpdater interface {
 	UpdateIssue(context.Context, string, linear.IssueUpdate) (linear.Issue, error)
 }
@@ -102,6 +107,51 @@ func (l *Loader) SwitchAccount(ctx context.Context, accountID string) (linear.Da
 	}
 	l.saveBestEffort(ctx, dashboard)
 	return dashboard, nil
+}
+
+// SwitchAccountCached selects an account and returns its cached snapshot
+// immediately when one exists. The UI can then refresh that account in the
+// background, keeping account switching useful while Linear is unavailable.
+func (l *Loader) SwitchAccountCached(ctx context.Context, accountID string) (linear.Dashboard, time.Time, error) {
+	if l == nil || l.remote == nil {
+		return linear.Dashboard{}, time.Time{}, errors.New("cached dashboard loader is not configured")
+	}
+	l.remoteMu.Lock()
+	defer l.remoteMu.Unlock()
+	selector, ok := l.remote.(AccountSelector)
+	if !ok {
+		return linear.Dashboard{}, time.Time{}, errors.New("cached account switching is not configured")
+	}
+	previousAccountID, err := selector.ActiveAccountID()
+	if err != nil {
+		return linear.Dashboard{}, time.Time{}, err
+	}
+	if err := selector.SelectAccount(accountID); err != nil {
+		return linear.Dashboard{}, time.Time{}, err
+	}
+
+	key, err := l.cacheKey()
+	if err == nil {
+		dashboard, cachedAt, loadErr := l.store.Load(ctx, key)
+		if loadErr == nil {
+			if decorator, ok := l.remote.(DashboardDecorator); ok {
+				dashboard, loadErr = decorator.DecorateDashboard(dashboard)
+			}
+			if loadErr == nil {
+				return dashboard, cachedAt, nil
+			}
+		}
+	}
+
+	dashboard, err := l.remote.FetchDashboard(ctx)
+	if err != nil {
+		if previousAccountID != "" {
+			_ = selector.SelectAccount(previousAccountID)
+		}
+		return linear.Dashboard{}, time.Time{}, err
+	}
+	l.saveBestEffort(ctx, dashboard)
+	return dashboard, time.Time{}, nil
 }
 
 func (l *Loader) UpdateIssue(ctx context.Context, issueID string, update linear.IssueUpdate) (linear.Issue, error) {

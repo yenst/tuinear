@@ -8,6 +8,7 @@ field editing and recoverable issue archiving.
 
 - Three-pane team, issue, and detail layout
 - Vim and arrow-key navigation
+- Compact footer with a complete `h` / `?` keybinding overlay
 - Team filtering with `tab`, `[` and `]`
 - Incremental identifier/title search with `/`
 - Composable assignee, status, priority, and project filters via `f`, persisted
@@ -15,11 +16,14 @@ field editing and recoverable issue archiving.
 - Positive filters with `enter`, multiple `NOT` filters with `!`, an explicit
   **Me** assignee, and an **Active** status preset
 - Loading, empty, and actionable error states
-- Manual refresh with `r`
+- Manual refresh with visible progress and actionable failures via `r`
 - Demo and snapshot modes that need no Linear account
 - Browser-based OAuth login with PKCE and automatic token refresh
 - Multiple simultaneous workspace/user profiles for work and personal accounts
+- Cache-first account switching, including while Linear is offline
 - Instant cached startup with background refresh and offline fallback
+- Terminal-native ANSI colors that follow the active terminal theme, plus an
+  explicit `Tuinear` window/tab title
 - Press `space` while browsing to open the selected issue's Linear URL in your default browser
 - Press `enter` to discover every action available for the selected issue
 - Edit the selected issue's title with `e`, including optimistic feedback and exact rollback on failure
@@ -86,7 +90,8 @@ go run ./cmd/tuinear --logout --profile personal
 user name is ambiguous. The chosen profile remains active on later launches.
 Connected accounts also appear beneath the team list in the TUI. Press `a` to
 switch to the next account or `A` to switch to the previous account; tickets
-reload in place.
+switch immediately from that profile's cache when available, then refresh in
+the background.
 
 ## Cache and offline use
 
@@ -101,6 +106,8 @@ refresh leaves the last-known-good tickets available. Corrupt or incompatible
 cache files are quarantined with a `.broken-<timestamp>` suffix and rebuilt.
 Active filters are stored separately for each profile, so they survive both
 dashboard refreshes and application restarts without crossing accounts.
+Dashboard refreshes use separate, bounded workspace, team-metadata, and issue
+queries so larger workspaces stay below Linear's per-query complexity ceiling.
 
 For development, `LINEAR_API_KEY` remains available as an explicit override.
 Demo mode does not need credentials: `go run ./cmd/tuinear --demo`.
@@ -115,6 +122,7 @@ go run ./cmd/tuinear --snapshot
 
 | Key | Action |
 | --- | --- |
+| `h` / `?` | Open or close the complete keybinding overlay |
 | `j` / `down` | Next issue |
 | `k` / `up` | Previous issue |
 | `g` / `home` | First issue |

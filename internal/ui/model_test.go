@@ -23,6 +23,24 @@ type cachedLoaderStub struct {
 	remoteFetches int
 }
 
+type cachedAccountLoaderStub struct {
+	work       linear.Dashboard
+	personal   linear.Dashboard
+	cachedAt   time.Time
+	selectedID string
+	fetches    int
+}
+
+func (s *cachedAccountLoaderStub) FetchDashboard(context.Context) (linear.Dashboard, error) {
+	s.fetches++
+	return s.personal, nil
+}
+
+func (s *cachedAccountLoaderStub) SwitchAccountCached(_ context.Context, accountID string) (linear.Dashboard, time.Time, error) {
+	s.selectedID = accountID
+	return s.personal, s.cachedAt, nil
+}
+
 func (s *cachedLoaderStub) LoadCachedDashboard(context.Context) (linear.Dashboard, time.Time, error) {
 	return s.cached, s.cachedAt, s.cacheErr
 }
@@ -126,6 +144,71 @@ func TestCycleAccountRefreshesDashboardInPlace(t *testing.T) {
 	}
 	if got.teamIndex != 0 || got.selected != 0 {
 		t.Fatalf("selection was not reset: team=%d issue=%d", got.teamIndex, got.selected)
+	}
+}
+
+func TestShiftAUsesCachedAccountThenRefreshes(t *testing.T) {
+	work, err := (linear.DemoClient{}).FetchDashboard(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	personal, err := (linear.DemoClient{}).SwitchAccount(t.Context(), "demo-personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader := &cachedAccountLoaderStub{
+		work: work, personal: personal, cachedAt: time.Now().Add(-time.Minute),
+	}
+	m := New(loader)
+	m.applyDashboard(work)
+	shiftA := tea.KeyPressMsg(tea.Key{Code: 'a', ShiftedCode: 'A', Mod: tea.ModShift})
+	updated, switchCmd := m.Update(shiftA)
+	m = updated.(Model)
+	if switchCmd == nil || !m.loading {
+		t.Fatal("shift+a did not start account switching")
+	}
+	updated, refreshCmd := m.Update(switchCmd())
+	m = updated.(Model)
+	if loader.selectedID != "demo-personal" || m.dashboard.ActiveAccountID != "demo-personal" {
+		t.Fatalf("selected account = %q, dashboard = %q", loader.selectedID, m.dashboard.ActiveAccountID)
+	}
+	if !m.fromCache || !m.refreshing || refreshCmd == nil || loader.fetches != 0 {
+		t.Fatalf("cached switch state = cached=%v refreshing=%v cmd=%v fetches=%d", m.fromCache, m.refreshing, refreshCmd != nil, loader.fetches)
+	}
+	updated, _ = m.Update(refreshCmd())
+	m = updated.(Model)
+	if m.fromCache || m.refreshing || loader.fetches != 1 {
+		t.Fatalf("refreshed switch state = cached=%v refreshing=%v fetches=%d", m.fromCache, m.refreshing, loader.fetches)
+	}
+}
+
+func TestHelpOverlayOpensWithEnhancedShiftKeyAndCloses(t *testing.T) {
+	dashboard, err := (linear.DemoClient{}).FetchDashboard(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewWithDashboard(dashboard)
+	m.width, m.height = 100, 28
+	shiftH := tea.KeyPressMsg(tea.Key{Code: 'h', ShiftedCode: 'H', Mod: tea.ModShift})
+	m = updateKey(m, shiftH)
+	if !m.help {
+		t.Fatal("shift+h did not open help")
+	}
+	view := m.View()
+	for _, expected := range []string{"Tuinear keybindings", "Navigate", "Ticket actions", "saved filters", "close this help"} {
+		if !strings.Contains(view.Content, expected) {
+			t.Errorf("help overlay missing %q", expected)
+		}
+	}
+	if lipgloss.Width(view.Content) != 100 || lipgloss.Height(view.Content) != 28 {
+		t.Fatalf("help view dimensions = %dx%d", lipgloss.Width(view.Content), lipgloss.Height(view.Content))
+	}
+	if view.WindowTitle != "Tuinear" {
+		t.Fatalf("window title = %q", view.WindowTitle)
+	}
+	m = updateKey(m, specialKey(tea.KeyEscape))
+	if m.help {
+		t.Fatal("escape did not close help")
 	}
 }
 
@@ -413,8 +496,32 @@ func TestOfflineRefreshKeepsLastKnownGoodDashboard(t *testing.T) {
 		t.Fatalf("offline cached state = %#v", m)
 	}
 	view := m.View().Content
-	if !strings.Contains(view, "offline · cached 2h") || !strings.Contains(view, "PLAT-42") {
+	if !strings.Contains(view, "offline · cached 2h") || !strings.Contains(view, "PLAT-42") ||
+		!strings.Contains(view, "Refresh: network unavailable") {
 		t.Fatal("offline cache is not visibly retained")
+	}
+}
+
+func TestManualRefreshShowsProgressAndAppliesFreshDashboard(t *testing.T) {
+	current, err := (linear.DemoClient{}).FetchDashboard(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := current
+	fresh.Organization.Name = "Fresh workspace"
+	loader := &cachedLoaderStub{remote: fresh}
+	m := New(loader)
+	m.applyDashboard(current)
+
+	updated, refreshCmd := m.Update(textKey("r"))
+	m = updated.(Model)
+	if refreshCmd == nil || !m.refreshing || !strings.Contains(m.View().Content, "refreshing") {
+		t.Fatalf("manual refresh did not visibly start: refreshing=%v cmd=%v", m.refreshing, refreshCmd != nil)
+	}
+	updated, _ = m.Update(refreshCmd())
+	m = updated.(Model)
+	if m.refreshing || m.refreshErr != nil || m.dashboard.Organization.Name != "Fresh workspace" || loader.remoteFetches != 1 {
+		t.Fatalf("manual refresh result = %#v, fetches=%d", m, loader.remoteFetches)
 	}
 }
 

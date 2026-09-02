@@ -24,6 +24,7 @@ empty states are handled.
 | [007g](007g-label-editing.md) | DONE | Apply or clear issue labels safely |
 | [007h](007h-description-editing.md) | DONE | Edit multiline issue descriptions safely |
 | [008](008-archive-and-delete.md) | DONE | Confirmed, recoverable issue archiving |
+| [010](010-interface-and-refresh-polish.md) | DONE | Compact help, reliable refresh/account switching, and terminal-native styling |
 
 The complete browsing and editing experience includes OAuth profiles, local
 search, filters, offline caching, browser links, guarded mutations, and

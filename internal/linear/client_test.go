@@ -23,6 +23,7 @@ func (f tokenSourceFunc) Token(ctx context.Context) (string, error) {
 
 func TestFetchDashboard(t *testing.T) {
 	t.Helper()
+	var requests []graphQLRequest
 	doer := httpDoerFunc(func(r *http.Request) (*http.Response, error) {
 		if got := r.Header.Get("Authorization"); got != "lin_api_test" {
 			t.Errorf("Authorization = %q", got)
@@ -30,37 +31,36 @@ func TestFetchDashboard(t *testing.T) {
 		if got := r.Header.Get("Content-Type"); got != "application/json" {
 			t.Errorf("Content-Type = %q", got)
 		}
-		body, _ := io.ReadAll(r.Body)
-		if !strings.Contains(string(body), `"first":100`) {
-			t.Errorf("request does not contain page size: %s", body)
+		var request graphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
 		}
-		if !strings.Contains(string(body), "users(first: $first)") {
-			t.Errorf("request does not fetch workspace users: %s", body)
-		}
-		if !strings.Contains(string(body), "projects(first: $first)") {
-			t.Errorf("request does not fetch team projects: %s", body)
-		}
-		if !strings.Contains(string(body), "issueLabels(first: $first)") {
-			t.Errorf("request does not fetch workspace labels: %s", body)
-		}
-		response := `{
-          "data": {
+		requests = append(requests, request)
+		var response string
+		switch {
+		case strings.Contains(request.Query, "TuinearDashboardWorkspace"):
+			response = `{"data": {
             "viewer": {"id":"me","name":"Jamie","displayName":"J","email":"j@example.com"},
             "organization": {"id":"org-1","name":"Acme","urlKey":"acme"},
             "users": {"nodes":[
               {"id":"me","name":"Jamie","displayName":"J"},
               {"id":"u2","name":"Aisha Chen","displayName":"Aisha"}
             ]},
-			"issueLabels": {"nodes":[
-			  {"id":"l2","name":"quality","color":"#00f"},
-			  {"id":"l1","name":"bug","color":"#f00"}
-			]},
-            "teams": {"nodes":[{"id":"t1","key":"ENG","name":"Engineering","states":{"nodes":[
+			"issueLabels": {"nodes":[{"id":"l2","name":"quality","color":"#00f"},{"id":"l1","name":"bug","color":"#f00"}]}
+		  }}`
+		case strings.Contains(request.Query, "TuinearDashboardTeams"):
+			response = `{"data":{"teams":{"nodes":[{"id":"t1","key":"ENG","name":"Engineering"}]}}}`
+		case strings.Contains(request.Query, "TuinearDashboardTeamDetails"):
+			response = `{"data": {
+            "team": {"id":"t1","key":"ENG","name":"Engineering","states":{"nodes":[
               {"id":"s0","name":"Backlog","type":"backlog","color":"#888","position":20},
               {"id":"s1","name":"Todo","type":"unstarted","color":"#fff","position":10}
             ]},"projects":{"nodes":[
               {"id":"p2","name":"Website"},{"id":"p1","name":"API"}
-            ]},"labels":{"nodes":[{"id":"l3","name":"backend","color":"#0f0"}]}}]},
+            ]},"labels":{"nodes":[{"id":"l3","name":"backend","color":"#0f0"}]}}
+		  }}`
+		case strings.Contains(request.Query, "TuinearDashboardIssues"):
+			response = `{"data": {
             "issues": {"nodes":[{
               "id":"i1","identifier":"ENG-1","title":"First ticket","description":"Details",
               "priority":2,"url":"https://linear.app/i1",
@@ -69,8 +69,10 @@ func TestFetchDashboard(t *testing.T) {
               "assignee":null,"team":{"id":"t1","key":"ENG","name":"Engineering"},
               "project":null,"labels":{"nodes":[{"id":"l1","name":"bug","color":"#f00"}]}
             }]}
-          }
-        }`
+		  }}`
+		default:
+			t.Fatalf("unexpected dashboard query: %s", request.Query)
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -82,6 +84,32 @@ func TestFetchDashboard(t *testing.T) {
 	dashboard, err := client.FetchDashboard(context.Background())
 	if err != nil {
 		t.Fatalf("FetchDashboard: %v", err)
+	}
+	if len(requests) != 4 {
+		t.Fatalf("request count = %d, want 4", len(requests))
+	}
+	for index, request := range requests {
+		if request.Variables["first"] != float64(100) {
+			t.Errorf("request %d page size = %#v", index+1, request.Variables["first"])
+		}
+	}
+	if query := requests[0].Query; !strings.Contains(query, "users(first: $first)") || !strings.Contains(query, "issueLabels(first: $first)") || strings.Contains(query, "teams {") || strings.Contains(query, "issues(first:") {
+		t.Errorf("workspace request has unexpected structure: %s", query)
+	}
+	if query := requests[1].Query; !strings.Contains(query, "teams(first: $first)") || strings.Contains(query, "states(") || strings.Contains(query, "projects(") || strings.Contains(query, "labels(") {
+		t.Errorf("team discovery request has nested connections: %s", query)
+	}
+	if query := requests[2].Query; !strings.Contains(query, "team(id: $teamID)") || !strings.Contains(query, "states(first: $nestedFirst)") || !strings.Contains(query, "projects(first: $first)") || !strings.Contains(query, "labels(first: $nestedFirst)") {
+		t.Errorf("team metadata request is not explicitly bounded: %s", query)
+	}
+	if requests[2].Variables["teamID"] != "t1" || requests[2].Variables["nestedFirst"] != float64(50) {
+		t.Errorf("team metadata variables = %#v", requests[2].Variables)
+	}
+	if query := requests[3].Query; !strings.Contains(query, "issues(first: $first") || !strings.Contains(query, "labels(first: $nestedFirst)") || strings.Contains(query, "teams(") || strings.Contains(query, "users(first:") {
+		t.Errorf("issues request has unexpected structure: %s", query)
+	}
+	if requests[3].Variables["nestedFirst"] != float64(50) {
+		t.Errorf("issues nested page size = %#v", requests[3].Variables["nestedFirst"])
 	}
 	if dashboard.Viewer.Label() != "J" || dashboard.Organization.Name != "Acme" || len(dashboard.Teams) != 1 || len(dashboard.Issues) != 1 {
 		t.Fatalf("unexpected dashboard: %#v", dashboard)
@@ -104,7 +132,9 @@ func TestFetchDashboard(t *testing.T) {
 }
 
 func TestFetchDashboardUsesOAuthBearerToken(t *testing.T) {
+	requestCount := 0
 	doer := httpDoerFunc(func(r *http.Request) (*http.Response, error) {
+		requestCount++
 		if got := r.Header.Get("Authorization"); got != "Bearer oauth-test" {
 			t.Errorf("Authorization = %q", got)
 		}
@@ -119,6 +149,9 @@ func TestFetchDashboardUsesOAuthBearerToken(t *testing.T) {
 	}), WithHTTPClient(doer))
 	if _, err := client.FetchDashboard(context.Background()); err != nil {
 		t.Fatalf("FetchDashboard: %v", err)
+	}
+	if requestCount != 3 {
+		t.Fatalf("request count with no teams = %d, want 3", requestCount)
 	}
 }
 
@@ -141,6 +174,43 @@ func TestFetchDashboardErrors(t *testing.T) {
 		_, err := NewClient("secret", WithHTTPClient(doer)).FetchDashboard(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "not authorized") {
 			t.Fatalf("error = %v", err)
+		}
+	})
+
+	t.Run("stops at failed request", func(t *testing.T) {
+		phases := []string{"workspace", "teams", "team metadata t1", "issues"}
+		for failedIndex, phase := range phases {
+			t.Run(phase, func(t *testing.T) {
+				requestCount := 0
+				doer := httpDoerFunc(func(request *http.Request) (*http.Response, error) {
+					requestCount++
+					if requestCount == failedIndex+1 {
+						return &http.Response{
+							StatusCode: http.StatusBadRequest,
+							Body:       io.NopCloser(strings.NewReader(`{"error":"Query too complex"}`)),
+							Header:     make(http.Header),
+						}, nil
+					}
+					var response string
+					if requestCount == 2 {
+						response = `{"data":{"teams":{"nodes":[{"id":"t1","key":"ENG","name":"Engineering"}]}}}`
+					} else {
+						response = `{"data":{}}`
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       io.NopCloser(strings.NewReader(response)),
+						Header:     make(http.Header),
+					}, nil
+				})
+				_, err := NewClient("secret", WithHTTPClient(doer)).FetchDashboard(context.Background())
+				if err == nil || !strings.Contains(err.Error(), "dashboard "+phase) || !strings.Contains(err.Error(), "Query too complex") {
+					t.Fatalf("error = %v", err)
+				}
+				if requestCount != failedIndex+1 {
+					t.Fatalf("request count = %d, want %d", requestCount, failedIndex+1)
+				}
+			})
 		}
 	})
 }

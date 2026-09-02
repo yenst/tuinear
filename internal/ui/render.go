@@ -56,6 +56,9 @@ func (m Model) render() string {
 			m.renderDetailsPanel(detailsWidth, bodyHeight),
 		)
 	}
+	if m.help {
+		body = m.renderHelpOverlay(body, width, bodyHeight)
+	}
 
 	return appStyle.Width(width).Height(height).Render(
 		lipgloss.JoinVertical(lipgloss.Left, header, body, footer),
@@ -134,7 +137,7 @@ func (m Model) renderSearchBar(width int) string {
 	if m.palette {
 		label += "  ·  Filter palette"
 	}
-	return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(label, max(1, width-2)))
+	return mutedStyle.Width(width).Padding(0, 1).Render(clip(label, max(1, width-2)))
 }
 
 func (m Model) activeFilters() []string {
@@ -210,52 +213,54 @@ func (m Model) renderFilterPalette(width, height int) string {
 }
 
 func (m Model) renderFooter(width int) string {
+	footer := func(value string) string {
+		return mutedStyle.Width(width).Padding(0, 1).Render(clip(value, max(1, width-2)))
+	}
+	if m.help {
+		return footer("h / ? / esc close help  ·  q quit")
+	}
 	if m.editor != nil {
 		help := "enter save  ·  esc cancel  ·  ctrl+u clear  ·  ←/→ move"
-		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+		return footer(help)
 	}
 	if m.choiceEditor != nil {
 		help := "enter save  ·  esc cancel  ·  j/k or arrows choose " + m.choiceEditor.field
-		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+		return footer(help)
 	}
 	if m.labelEditor != nil {
 		help := "space toggle  ·  enter apply  ·  esc cancel  ·  j/k or arrows choose label"
-		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+		return footer(help)
 	}
 	if m.descriptionEditor != nil {
 		help := "ctrl+s save  ·  esc cancel  ·  enter newline  ·  arrows move  ·  ctrl+u clear"
-		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+		return footer(help)
 	}
 	if m.archiveConfirm != nil {
 		help := "enter choose  ·  esc cancel  ·  arrows select  ·  cancellation is selected by default"
-		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+		return footer(help)
 	}
 	if m.actionMenu != nil {
 		help := "enter choose  ·  esc cancel  ·  j/k or arrows move  ·  e/s/p/u/P/l/d/space/x quick action"
-		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+		return footer(help)
 	}
 	if m.palette {
 		help := "enter include/clear  ·  ! toggle NOT  ·  j/k or arrows choose  ·  esc close"
-		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+		return footer(help)
 	}
 	if m.editErr != nil {
 		help := "Action: " + m.editErr.Error() + "  ·  retry with e/s/p/u/P/l/d/x"
-		return lipgloss.NewStyle().Foreground(theme.red).Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+		return lipgloss.NewStyle().Foreground(theme.red).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
 	}
 	if m.browserErr != nil {
 		help := "Browser: " + m.browserErr.Error() + "  ·  space retries"
-		return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+		return footer(help)
 	}
 	if m.filterErr != nil {
 		help := "Filters: " + m.filterErr.Error() + "  ·  change a filter to retry saving"
-		return lipgloss.NewStyle().Foreground(theme.red).Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+		return lipgloss.NewStyle().Foreground(theme.red).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
 	}
-	help := "enter actions  ·  e title  ·  s status  ·  p priority  ·  u assignee  ·  P project  ·  l labels  ·  d description  ·  x archive  ·  space open  ·  / search  ·  f filters  ·  j/k move  ·  tab team  ·  a account  ·  r refresh  ·  q quit"
-	if width < 96 {
-		help = "enter actions  ·  e title  ·  s status  ·  p priority  ·  u assignee  ·  P project  ·  l labels  ·  d description  ·  x archive  ·  space open  ·  / search  ·  f filters  ·  q quit"
+	if m.refreshErr != nil {
+		return footer("Refresh: " + m.refreshErr.Error() + "  ·  r retry  ·  a/A account  ·  h help")
 	}
-	if width < 72 {
-		help = "enter actions  ·  e/s/p/u/P/l/d edit  ·  x archive  ·  space open  ·  / search  ·  f filters  ·  q quit"
-	}
-	return mutedStyle.Background(theme.background).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
+	return footer("h help  ·  enter actions  ·  / search  ·  f filters  ·  a/A account  ·  r refresh  ·  q quit")
 }
