@@ -34,6 +34,10 @@ func (DemoClient) UpdateIssue(_ context.Context, issueID string, update IssueUpd
 			issue.Title = title
 			issue.UpdatedAt = time.Now()
 		}
+		if update.Description != nil {
+			issue.Description = *update.Description
+			issue.UpdatedAt = time.Now()
+		}
 		if update.StateID != nil {
 			found := false
 			for _, state := range dashboard.StatesForTeam(issue.Team.ID) {
@@ -48,9 +52,81 @@ func (DemoClient) UpdateIssue(_ context.Context, issueID string, update IssueUpd
 				return Issue{}, fmt.Errorf("unknown demo workflow state %q", *update.StateID)
 			}
 		}
+		if update.Priority != nil {
+			if *update.Priority < 0 || *update.Priority > 4 {
+				return Issue{}, fmt.Errorf("issue priority must be between 0 and 4")
+			}
+			issue.Priority = *update.Priority
+			issue.UpdatedAt = time.Now()
+		}
+		if update.AssigneeID != nil {
+			issue.Assignee = nil
+			if *update.AssigneeID != nil {
+				assigneeID := strings.TrimSpace(**update.AssigneeID)
+				for _, user := range dashboard.Users {
+					if user.ID == assigneeID {
+						assignee := user
+						issue.Assignee = &assignee
+						break
+					}
+				}
+				if issue.Assignee == nil {
+					return Issue{}, fmt.Errorf("unknown demo assignee %q", assigneeID)
+				}
+			}
+			issue.UpdatedAt = time.Now()
+		}
+		if update.ProjectID != nil {
+			issue.Project = nil
+			if *update.ProjectID != nil {
+				projectID := strings.TrimSpace(**update.ProjectID)
+				for _, project := range dashboard.ProjectsForTeam(issue.Team.ID) {
+					if project.ID == projectID {
+						selected := project
+						issue.Project = &selected
+						break
+					}
+				}
+				if issue.Project == nil {
+					return Issue{}, fmt.Errorf("unknown demo project %q", projectID)
+				}
+			}
+			issue.UpdatedAt = time.Now()
+		}
+		if update.LabelIDs != nil {
+			available := dashboard.LabelsForTeam(issue.Team.ID)
+			byID := make(map[string]Label, len(available))
+			for _, label := range available {
+				byID[label.ID] = label
+			}
+			labels := make([]Label, 0, len(*update.LabelIDs))
+			seen := make(map[string]bool, len(*update.LabelIDs))
+			for _, value := range *update.LabelIDs {
+				labelID := strings.TrimSpace(value)
+				label, ok := byID[labelID]
+				if !ok {
+					return Issue{}, fmt.Errorf("unknown demo label %q", labelID)
+				}
+				if !seen[labelID] {
+					seen[labelID] = true
+					labels = append(labels, label)
+				}
+			}
+			issue.Labels = labels
+			issue.UpdatedAt = time.Now()
+		}
 		return issue, nil
 	}
 	return Issue{}, fmt.Errorf("unknown demo issue %q", issueID)
+}
+
+func (DemoClient) ArchiveIssue(_ context.Context, issueID string) error {
+	for _, issue := range demoDashboard("demo-work").Issues {
+		if issue.ID == issueID {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown demo issue %q", issueID)
 }
 
 func demoDashboard(activeAccountID string) Dashboard {
@@ -68,7 +144,12 @@ func demoDashboard(activeAccountID string) Dashboard {
 	aisha := User{ID: "user-aisha", Name: "Aisha Chen", DisplayName: "Aisha"}
 	marcus := User{ID: "user-marcus", Name: "Marcus Bell", DisplayName: "Marcus"}
 	launch := Project{ID: "project-launch", Name: "Public launch"}
+	platformQuality := Project{ID: "project-platform-quality", Name: "Platform quality"}
+	productPolish := Project{ID: "project-product-polish", Name: "Product polish"}
 	quality := Label{ID: "label-quality", Name: "quality", Color: "#5E6AD2"}
+	testing := Label{ID: "label-testing", Name: "testing", Color: "#4CB782"}
+	platformLabel := Label{ID: "label-platform", Name: "platform", Color: "#F2C94C"}
+	productLabel := Label{ID: "label-product", Name: "product", Color: "#EB5757"}
 
 	accounts := []Account{
 		{ID: "demo-work", WorkspaceName: "Acme", WorkspaceKey: "acme", UserName: "Jamie", UserEmail: "jamie@acme.test"},
@@ -80,6 +161,7 @@ func demoDashboard(activeAccountID string) Dashboard {
 		viewer = Viewer{ID: "viewer-personal", Name: "Jamie", DisplayName: "Jamie", Email: "jamie@example.com"}
 		organization = Organization{ID: "demo-personal", Name: "Personal", URLKey: "personal"}
 	}
+	jamie := User{ID: viewer.ID, Name: viewer.Name, DisplayName: viewer.DisplayName}
 
 	return Dashboard{
 		Viewer:          viewer,
@@ -91,6 +173,16 @@ func demoDashboard(activeAccountID string) Dashboard {
 			{TeamID: platform.ID, States: []WorkflowState{platformBacklog, platformTodo, platformProgress, platformDone}},
 			{TeamID: product.ID, States: []WorkflowState{productBacklog, productTodo, productProgress, productDone}},
 		},
+		TeamProjects: []TeamProjects{
+			{TeamID: platform.ID, Projects: []Project{launch, platformQuality}},
+			{TeamID: product.ID, Projects: []Project{launch, productPolish}},
+		},
+		WorkspaceLabels: []Label{quality, testing},
+		TeamLabels: []TeamLabels{
+			{TeamID: platform.ID, Labels: []Label{platformLabel}},
+			{TeamID: product.ID, Labels: []Label{productLabel}},
+		},
+		Users: []User{jamie, aisha, marcus},
 		Issues: []Issue{
 			{
 				ID: "1", Identifier: "PLAT-42", Title: "Persist the issue cache between sessions",
@@ -111,7 +203,7 @@ func demoDashboard(activeAccountID string) Dashboard {
 				Description: "Drive the real application with key presses and assert the visible screen. This is the reliability bar we want to borrow from LazyGit.",
 				Priority:    3, UpdatedAt: now.Add(-2 * time.Hour), CreatedAt: now.Add(-7 * 24 * time.Hour),
 				State: platformBacklog, Team: platform,
-				Labels: []Label{{ID: "label-test", Name: "testing", Color: "#4CB782"}}, URL: "https://linear.app/demo/issue/PLAT-37",
+				Labels: []Label{testing}, URL: "https://linear.app/demo/issue/PLAT-37",
 			},
 			{
 				ID: "4", Identifier: "PROD-11", Title: "Define the read-only MVP boundary",

@@ -14,12 +14,12 @@ func TestStatusEditorUsesOnlySelectedIssuesTeamStates(t *testing.T) {
 	dashboard := editorDashboard(t)
 	m := NewWithDashboardAndUpdater(dashboard, &issueUpdaterStub{})
 	m = updateKey(m, textKey("s"))
-	if m.statusEditor == nil || len(m.statusEditor.options) != 4 {
-		t.Fatalf("status editor = %#v", m.statusEditor)
+	if m.choiceEditor == nil || len(m.choiceEditor.options) != 4 {
+		t.Fatalf("status editor = %#v", m.choiceEditor)
 	}
-	for _, state := range m.statusEditor.options {
-		if !strings.HasPrefix(state.ID, "platform-") {
-			t.Fatalf("cross-team state leaked into picker: %#v", state)
+	for _, choice := range m.choiceEditor.options {
+		if !strings.HasPrefix(choice.state.ID, "platform-") {
+			t.Fatalf("cross-team state leaked into picker: %#v", choice.state)
 		}
 	}
 	view := m.View().Content
@@ -41,8 +41,8 @@ func TestStatusEditIsOptimisticAndUsesCanonicalResponse(t *testing.T) {
 
 	updated, cmd := m.Update(specialKey(tea.KeyEnter))
 	m = updated.(Model)
-	if cmd == nil || m.statusEditor != nil || m.pendingEdit == nil {
-		t.Fatalf("submit state = editor=%#v pending=%#v cmd=%v", m.statusEditor, m.pendingEdit, cmd != nil)
+	if cmd == nil || m.choiceEditor != nil || m.pendingEdit == nil {
+		t.Fatalf("submit state = editor=%#v pending=%#v cmd=%v", m.choiceEditor, m.pendingEdit, cmd != nil)
 	}
 	if got := m.dashboard.Issues[0].State; got.ID != "platform-done" {
 		t.Fatalf("optimistic state = %#v", got)
@@ -50,7 +50,7 @@ func TestStatusEditIsOptimisticAndUsesCanonicalResponse(t *testing.T) {
 
 	updated, _ = m.Update(cmd())
 	m = updated.(Model)
-	if updater.calls != 1 || updater.update.StateID == nil || *updater.update.StateID != "platform-done" || updater.update.Title != nil {
+	if updater.calls != 1 || updater.update.StateID == nil || *updater.update.StateID != "platform-done" || updater.update.Title != nil || updater.update.Priority != nil {
 		t.Fatalf("status mutation = calls=%d update=%#v", updater.calls, updater.update)
 	}
 	if m.pendingEdit != nil || m.editErr != nil || m.dashboard.Issues[0].State.ID != canonical.State.ID {
@@ -91,7 +91,7 @@ func TestOpenStatusEditorRebasesOverBackgroundRefresh(t *testing.T) {
 	fresh.Issues[0].State = fresh.StatesForTeam(fresh.Issues[0].Team.ID)[1]
 	updated, _ := m.Update(dashboardLoadedMsg{dashboard: fresh})
 	m = updated.(Model)
-	if m.statusEditor == nil || m.statusEditor.options[m.statusEditor.selected].ID != "platform-done" {
+	if m.choiceEditor == nil || m.choiceEditor.options[m.choiceEditor.selected].state.ID != "platform-done" {
 		t.Fatal("refresh discarded the selected status choice")
 	}
 	updated, cmd := m.Update(specialKey(tea.KeyEnter))
@@ -112,8 +112,8 @@ func TestStatusEditorNeedsStableWorkflowStateIDs(t *testing.T) {
 	}
 	m := NewWithDashboardAndUpdater(dashboard, &issueUpdaterStub{})
 	m = updateKey(m, textKey("s"))
-	if m.statusEditor != nil || m.editErr == nil || !strings.Contains(m.editErr.Error(), "no editable statuses") {
-		t.Fatalf("missing state metadata = editor=%#v error=%v", m.statusEditor, m.editErr)
+	if m.choiceEditor != nil || m.editErr == nil || !strings.Contains(m.editErr.Error(), "no editable statuses") {
+		t.Fatalf("missing state metadata = editor=%#v error=%v", m.choiceEditor, m.editErr)
 	}
 }
 
@@ -126,7 +126,7 @@ func TestStatusKeyIsIsolatedFromSearchAndFilterPalette(t *testing.T) {
 		m := NewWithDashboardAndUpdater(dashboard, &issueUpdaterStub{})
 		configure(&m)
 		m = updateKey(m, textKey("s"))
-		if m.statusEditor != nil {
+		if m.choiceEditor != nil {
 			t.Fatal("status picker opened through another modal mode")
 		}
 	}

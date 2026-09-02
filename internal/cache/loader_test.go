@@ -11,12 +11,21 @@ import (
 )
 
 type remoteStub struct {
-	dashboard linear.Dashboard
-	err       error
-	fetches   int
-	updated   linear.Issue
-	updateErr error
-	updates   int
+	dashboard  linear.Dashboard
+	err        error
+	fetches    int
+	updated    linear.Issue
+	updateErr  error
+	updates    int
+	archiveErr error
+	archives   int
+	archivedID string
+}
+
+func (s *remoteStub) ArchiveIssue(_ context.Context, issueID string) error {
+	s.archives++
+	s.archivedID = issueID
+	return s.archiveErr
 }
 
 func (s *remoteStub) FetchDashboard(context.Context) (linear.Dashboard, error) {
@@ -143,6 +152,112 @@ func TestLoaderCachesConfirmedStatusUpdate(t *testing.T) {
 	}
 }
 
+func TestLoaderCachesConfirmedPriorityUpdate(t *testing.T) {
+	store := openTestStore(t)
+	dashboard := demoDashboard(t)
+	if err := store.Save(t.Context(), "work", dashboard, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	updated := dashboard.Issues[0]
+	updated.Priority = 1
+	remote := &remoteStub{updated: updated}
+	loader := NewLoader(store, remote, func() (string, error) { return "work", nil })
+	priority := updated.Priority
+	if _, err := loader.UpdateIssue(t.Context(), updated.ID, linear.IssueUpdate{Priority: &priority}); err != nil {
+		t.Fatal(err)
+	}
+	cached, _, err := store.Load(t.Context(), "work")
+	if err != nil || cached.Issues[0].Priority != updated.Priority {
+		t.Fatalf("cached priority = %d, %v", cached.Issues[0].Priority, err)
+	}
+}
+
+func TestLoaderCachesConfirmedAssigneeUpdate(t *testing.T) {
+	store := openTestStore(t)
+	dashboard := demoDashboard(t)
+	if err := store.Save(t.Context(), "work", dashboard, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	updated := dashboard.Issues[0]
+	updated.Assignee = &dashboard.Users[0]
+	remote := &remoteStub{updated: updated}
+	loader := NewLoader(store, remote, func() (string, error) { return "work", nil })
+	assigneeID := updated.Assignee.ID
+	selected := &assigneeID
+	if _, err := loader.UpdateIssue(t.Context(), updated.ID, linear.IssueUpdate{AssigneeID: &selected}); err != nil {
+		t.Fatal(err)
+	}
+	cached, _, err := store.Load(t.Context(), "work")
+	if err != nil || cached.Issues[0].Assignee == nil || cached.Issues[0].Assignee.ID != updated.Assignee.ID {
+		t.Fatalf("cached assignee = %#v, %v", cached.Issues[0].Assignee, err)
+	}
+}
+
+func TestLoaderCachesConfirmedProjectUpdate(t *testing.T) {
+	store := openTestStore(t)
+	dashboard := demoDashboard(t)
+	if err := store.Save(t.Context(), "work", dashboard, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	updated := dashboard.Issues[0]
+	projects := dashboard.ProjectsForTeam(updated.Team.ID)
+	updated.Project = &projects[len(projects)-1]
+	remote := &remoteStub{updated: updated}
+	loader := NewLoader(store, remote, func() (string, error) { return "work", nil })
+	projectID := updated.Project.ID
+	selected := &projectID
+	if _, err := loader.UpdateIssue(t.Context(), updated.ID, linear.IssueUpdate{ProjectID: &selected}); err != nil {
+		t.Fatal(err)
+	}
+	cached, _, err := store.Load(t.Context(), "work")
+	if err != nil || cached.Issues[0].Project == nil || cached.Issues[0].Project.ID != updated.Project.ID {
+		t.Fatalf("cached project = %#v, %v", cached.Issues[0].Project, err)
+	}
+}
+
+func TestLoaderCachesConfirmedLabelUpdate(t *testing.T) {
+	store := openTestStore(t)
+	dashboard := demoDashboard(t)
+	if err := store.Save(t.Context(), "work", dashboard, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	updated := dashboard.Issues[0]
+	updated.Labels = dashboard.LabelsForTeam(updated.Team.ID)
+	remote := &remoteStub{updated: updated}
+	loader := NewLoader(store, remote, func() (string, error) { return "work", nil })
+	labelIDs := make([]string, 0, len(updated.Labels))
+	for _, label := range updated.Labels {
+		labelIDs = append(labelIDs, label.ID)
+	}
+	if _, err := loader.UpdateIssue(t.Context(), updated.ID, linear.IssueUpdate{LabelIDs: &labelIDs}); err != nil {
+		t.Fatal(err)
+	}
+	cached, _, err := store.Load(t.Context(), "work")
+	if err != nil || len(cached.Issues[0].Labels) != len(updated.Labels) {
+		t.Fatalf("cached labels = %#v, %v", cached.Issues[0].Labels, err)
+	}
+}
+
+func TestLoaderCachesConfirmedDescriptionUpdate(t *testing.T) {
+	store := openTestStore(t)
+	dashboard := demoDashboard(t)
+	if err := store.Save(t.Context(), "work", dashboard, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	updated := dashboard.Issues[0]
+	updated.Description = "# Confirmed\n\nCached markdown"
+	remote := &remoteStub{updated: updated}
+	loader := NewLoader(store, remote, func() (string, error) { return "work", nil })
+	description := updated.Description
+	if _, err := loader.UpdateIssue(t.Context(), updated.ID, linear.IssueUpdate{Description: &description}); err != nil {
+		t.Fatal(err)
+	}
+	cached, _, err := store.Load(t.Context(), "work")
+	if err != nil || cached.Issues[0].Description != updated.Description {
+		t.Fatalf("cached description = %q, %v", cached.Issues[0].Description, err)
+	}
+}
+
 func TestLoaderDoesNotChangeCacheWhenIssueUpdateFails(t *testing.T) {
 	store := openTestStore(t)
 	dashboard := demoDashboard(t)
@@ -159,5 +274,45 @@ func TestLoaderDoesNotChangeCacheWhenIssueUpdateFails(t *testing.T) {
 	cached, _, err := store.Load(t.Context(), "work")
 	if err != nil || cached.Issues[0].Title != original {
 		t.Fatalf("failed update changed cache to %q, %v", cached.Issues[0].Title, err)
+	}
+}
+
+func TestLoaderRemovesOnlyConfirmedArchivedIssueFromCache(t *testing.T) {
+	store := openTestStore(t)
+	dashboard := demoDashboard(t)
+	if err := store.Save(t.Context(), "work", dashboard, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	remote := &remoteStub{}
+	loader := NewLoader(store, remote, func() (string, error) { return "work", nil })
+	archivedID := dashboard.Issues[0].ID
+	if err := loader.ArchiveIssue(t.Context(), archivedID); err != nil {
+		t.Fatal(err)
+	}
+	cached, _, err := store.Load(t.Context(), "work")
+	if err != nil || len(cached.Issues) != len(dashboard.Issues)-1 || remote.archives != 1 || remote.archivedID != archivedID {
+		t.Fatalf("archive cache = %d issues, %v; remote=%d/%q", len(cached.Issues), err, remote.archives, remote.archivedID)
+	}
+	for _, issue := range cached.Issues {
+		if issue.ID == archivedID {
+			t.Fatal("confirmed archived issue remains cached")
+		}
+	}
+}
+
+func TestLoaderKeepsCacheWhenArchiveFails(t *testing.T) {
+	store := openTestStore(t)
+	dashboard := demoDashboard(t)
+	if err := store.Save(t.Context(), "work", dashboard, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	remote := &remoteStub{archiveErr: errors.New("archive forbidden")}
+	loader := NewLoader(store, remote, func() (string, error) { return "work", nil })
+	if err := loader.ArchiveIssue(t.Context(), dashboard.Issues[0].ID); err == nil {
+		t.Fatal("archive failure was hidden")
+	}
+	cached, _, err := store.Load(t.Context(), "work")
+	if err != nil || len(cached.Issues) != len(dashboard.Issues) {
+		t.Fatalf("failed archive changed cache: %d issues, %v", len(cached.Issues), err)
 	}
 }

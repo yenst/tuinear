@@ -43,38 +43,47 @@ type issueBrowserFailedMsg struct{ err error }
 type BrowserOpener func(string) error
 
 type Model struct {
-	loader       DashboardLoader
-	dashboard    linear.Dashboard
-	issues       []linear.Issue
-	teamIndex    int
-	selected     int
-	query        string
-	filters      IssueFilters
-	searching    bool
-	palette      bool
-	paletteIdx   int
-	width        int
-	height       int
-	loading      bool
-	err          error
-	lastLoaded   time.Time
-	fromCache    bool
-	cachedAt     time.Time
-	refreshing   bool
-	refreshErr   error
-	browserOpen  BrowserOpener
-	browserErr   error
-	issueUpdater IssueUpdater
-	editor       *titleEditor
-	statusEditor *statusEditor
-	pendingEdit  *pendingIssueEdit
-	editErr      error
+	loader            DashboardLoader
+	dashboard         linear.Dashboard
+	issues            []linear.Issue
+	teamIndex         int
+	selected          int
+	query             string
+	filters           IssueFilters
+	searching         bool
+	palette           bool
+	paletteIdx        int
+	width             int
+	height            int
+	loading           bool
+	err               error
+	lastLoaded        time.Time
+	fromCache         bool
+	cachedAt          time.Time
+	refreshing        bool
+	refreshErr        error
+	browserOpen       BrowserOpener
+	browserErr        error
+	issueUpdater      IssueUpdater
+	issueArchiver     IssueArchiver
+	editor            *titleEditor
+	choiceEditor      *choiceEditor
+	labelEditor       *labelEditor
+	descriptionEditor *descriptionEditor
+	archiveConfirm    *archiveConfirmation
+	actionMenu        *actionMenu
+	pendingEdit       *pendingIssueEdit
+	pendingArchive    *pendingIssueArchive
+	editErr           error
 }
 
 func New(loader DashboardLoader) Model {
 	m := Model{loader: loader, width: 120, height: 34, loading: true, browserOpen: browser.Open}
 	if updater, ok := loader.(IssueUpdater); ok {
 		m.issueUpdater = updater
+	}
+	if archiver, ok := loader.(IssueArchiver); ok {
+		m.issueArchiver = archiver
 	}
 	return m
 }
@@ -88,6 +97,9 @@ func NewWithDashboard(dashboard linear.Dashboard) Model {
 func NewWithDashboardAndUpdater(dashboard linear.Dashboard, updater IssueUpdater) Model {
 	m := NewWithDashboard(dashboard)
 	m.issueUpdater = updater
+	if archiver, ok := updater.(IssueArchiver); ok {
+		m.issueArchiver = archiver
+	}
 	return m
 }
 
@@ -186,6 +198,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case issueUpdateFailedMsg:
 		m.rollbackIssueEdit(msg.issueID, msg.err)
 		return m, nil
+	case issueArchivedMsg:
+		m.finishIssueArchive(msg.issueID)
+		return m, nil
+	case issueArchiveFailedMsg:
+		m.failIssueArchive(msg.issueID, msg.err)
+		return m, nil
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -193,8 +211,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editor != nil {
 			return m, m.updateTitleEditor(msg)
 		}
-		if m.statusEditor != nil {
-			return m, m.updateStatusEditor(msg)
+		if m.choiceEditor != nil {
+			return m, m.updateChoiceEditor(msg)
+		}
+		if m.labelEditor != nil {
+			return m, m.updateLabelEditor(msg)
+		}
+		if m.descriptionEditor != nil {
+			return m, m.updateDescriptionEditor(msg)
+		}
+		if m.archiveConfirm != nil {
+			return m, m.updateArchiveConfirmation(msg)
+		}
+		if m.actionMenu != nil {
+			return m, m.updateActionMenu(msg)
+		}
+		if m.pendingArchive != nil {
+			return m, nil
 		}
 		if m.palette {
 			m.updatePalette(msg)
@@ -236,10 +269,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.paletteIdx = 0
 		case "space", " ":
 			return m, m.openSelectedIssue()
+		case "enter", "return":
+			m.beginIssueActions()
 		case "e":
 			m.beginTitleEdit()
 		case "s":
 			m.beginStatusEdit()
+		case "p":
+			m.beginPriorityEdit()
+		case "u":
+			m.beginAssigneeEdit()
+		case "P":
+			m.beginProjectEdit()
+		case "l":
+			m.beginLabelEdit()
+		case "d":
+			m.beginDescriptionEdit()
+		case "x":
+			m.beginArchiveConfirmation()
 		case "esc":
 			if m.query != "" {
 				m.query = ""

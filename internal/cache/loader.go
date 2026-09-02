@@ -24,6 +24,10 @@ type IssueUpdater interface {
 	UpdateIssue(context.Context, string, linear.IssueUpdate) (linear.Issue, error)
 }
 
+type IssueArchiver interface {
+	ArchiveIssue(context.Context, string) error
+}
+
 type DashboardDecorator interface {
 	DecorateDashboard(linear.Dashboard) (linear.Dashboard, error)
 }
@@ -127,6 +131,38 @@ func (l *Loader) UpdateIssue(ctx context.Context, issueID string, update linear.
 		}
 	}
 	return issue, nil
+}
+
+func (l *Loader) ArchiveIssue(ctx context.Context, issueID string) error {
+	if l == nil || l.remote == nil {
+		return errors.New("cached dashboard loader is not configured")
+	}
+	l.remoteMu.Lock()
+	defer l.remoteMu.Unlock()
+	archiver, ok := l.remote.(IssueArchiver)
+	if !ok {
+		return errors.New("issue archiving is not configured")
+	}
+	if err := archiver.ArchiveIssue(ctx, issueID); err != nil {
+		return err
+	}
+	key, err := l.cacheKey()
+	if err != nil {
+		return nil
+	}
+	dashboard, _, err := l.store.Load(ctx, key)
+	if err != nil {
+		return nil
+	}
+	issues := dashboard.Issues[:0]
+	for _, issue := range dashboard.Issues {
+		if issue.ID != issueID {
+			issues = append(issues, issue)
+		}
+	}
+	dashboard.Issues = issues
+	l.saveBestEffort(ctx, dashboard)
+	return nil
 }
 
 func (l *Loader) cacheKey() (string, error) {

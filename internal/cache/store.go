@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -97,6 +98,30 @@ func (s *Store) Save(ctx context.Context, accountKey string, dashboard linear.Da
 			states[workflowStateKey(state)] = state
 		}
 	}
+	for _, user := range dashboard.Users {
+		if user.ID != "" {
+			users[user.ID] = user
+		}
+	}
+	for _, group := range dashboard.TeamProjects {
+		for _, project := range group.Projects {
+			if project.ID != "" {
+				projects[project.ID] = project
+			}
+		}
+	}
+	for _, label := range dashboard.WorkspaceLabels {
+		if label.ID != "" {
+			labels[label.ID] = label
+		}
+	}
+	for _, group := range dashboard.TeamLabels {
+		for _, label := range group.Labels {
+			if label.ID != "" {
+				labels[label.ID] = label
+			}
+		}
+	}
 	for _, issue := range dashboard.Issues {
 		states[workflowStateKey(issue.State)] = issue.State
 		if issue.Assignee != nil {
@@ -135,9 +160,59 @@ func (s *Store) Save(ctx context.Context, accountKey string, dashboard linear.Da
 			return fmt.Errorf("store cached projects: %w", err)
 		}
 	}
+	for _, group := range dashboard.TeamProjects {
+		if !teamSeen[group.TeamID] {
+			continue
+		}
+		seen := make(map[string]bool, len(group.Projects))
+		for position, project := range group.Projects {
+			if project.ID == "" || seen[project.ID] {
+				continue
+			}
+			seen[project.ID] = true
+			if _, ok := projects[project.ID]; !ok {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO team_projects VALUES (?, ?, ?, ?)`,
+				accountKey, group.TeamID, project.ID, position); err != nil {
+				return fmt.Errorf("store cached team projects: %w", err)
+			}
+		}
+	}
 	for _, label := range labels {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO labels VALUES (?, ?, ?, ?)`, accountKey, label.ID, label.Name, label.Color); err != nil {
 			return fmt.Errorf("store cached labels: %w", err)
+		}
+	}
+	seenWorkspaceLabels := make(map[string]bool, len(dashboard.WorkspaceLabels))
+	for position, label := range dashboard.WorkspaceLabels {
+		if label.ID == "" || seenWorkspaceLabels[label.ID] {
+			continue
+		}
+		seenWorkspaceLabels[label.ID] = true
+		if _, ok := labels[label.ID]; !ok {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_labels VALUES (?, ?, ?)`, accountKey, label.ID, position); err != nil {
+			return fmt.Errorf("store cached workspace labels: %w", err)
+		}
+	}
+	for _, group := range dashboard.TeamLabels {
+		if !teamSeen[group.TeamID] {
+			continue
+		}
+		seen := make(map[string]bool, len(group.Labels))
+		for position, label := range group.Labels {
+			if label.ID == "" || seen[label.ID] {
+				continue
+			}
+			seen[label.ID] = true
+			if _, ok := labels[label.ID]; !ok {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO team_labels VALUES (?, ?, ?, ?)`, accountKey, group.TeamID, label.ID, position); err != nil {
+				return fmt.Errorf("store cached team labels: %w", err)
+			}
 		}
 	}
 
@@ -211,7 +286,29 @@ func (s *Store) Load(ctx context.Context, accountKey string) (linear.Dashboard, 
 	if err != nil {
 		return linear.Dashboard{}, time.Time{}, err
 	}
+	for _, user := range users {
+		dashboard.Users = append(dashboard.Users, user)
+	}
+	sort.SliceStable(dashboard.Users, func(i, j int) bool {
+		return strings.ToLower(dashboard.Users[i].Label()) < strings.ToLower(dashboard.Users[j].Label())
+	})
 	projects, err := loadProjects(ctx, s.db, accountKey)
+	if err != nil {
+		return linear.Dashboard{}, time.Time{}, err
+	}
+	dashboard.TeamProjects, err = loadTeamProjects(ctx, s.db, accountKey, dashboard.Teams, projects)
+	if err != nil {
+		return linear.Dashboard{}, time.Time{}, err
+	}
+	labels, err := loadLabels(ctx, s.db, accountKey)
+	if err != nil {
+		return linear.Dashboard{}, time.Time{}, err
+	}
+	dashboard.WorkspaceLabels, err = loadWorkspaceLabels(ctx, s.db, accountKey, labels)
+	if err != nil {
+		return linear.Dashboard{}, time.Time{}, err
+	}
+	dashboard.TeamLabels, err = loadTeamLabels(ctx, s.db, accountKey, dashboard.Teams, labels)
 	if err != nil {
 		return linear.Dashboard{}, time.Time{}, err
 	}
@@ -341,24 +438,33 @@ func loadProjects(ctx context.Context, db *sql.DB, accountKey string) (map[strin
 	return values, rows.Err()
 }
 
-func loadIssueLabels(ctx context.Context, db *sql.DB, accountKey string) (map[string][]linear.Label, error) {
-	rows, err := db.QueryContext(ctx, `SELECT il.issue_id, l.id, l.name, l.color FROM issue_labels il
-        JOIN labels l ON l.account_key = il.account_key AND l.id = il.label_id
-        WHERE il.account_key = ? ORDER BY il.issue_id, il.position`, accountKey)
+func loadTeamProjects(ctx context.Context, db *sql.DB, accountKey string, teams []linear.Team, projects map[string]linear.Project) ([]linear.TeamProjects, error) {
+	rows, err := db.QueryContext(ctx, `SELECT team_id, project_id FROM team_projects
+        WHERE account_key = ? ORDER BY team_id, position`, accountKey)
 	if err != nil {
-		return nil, fmt.Errorf("load cached labels: %w", err)
+		return nil, fmt.Errorf("load cached team projects: %w", err)
 	}
 	defer rows.Close()
-	values := map[string][]linear.Label{}
+	byTeam := make(map[string][]linear.Project, len(teams))
 	for rows.Next() {
-		var issueID string
-		var value linear.Label
-		if err := rows.Scan(&issueID, &value.ID, &value.Name, &value.Color); err != nil {
+		var teamID, projectID string
+		if err := rows.Scan(&teamID, &projectID); err != nil {
 			return nil, err
 		}
-		values[issueID] = append(values[issueID], value)
+		if project, ok := projects[projectID]; ok {
+			byTeam[teamID] = append(byTeam[teamID], project)
+		}
 	}
-	return values, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	groups := make([]linear.TeamProjects, 0, len(byTeam))
+	for _, team := range teams {
+		if values := byTeam[team.ID]; len(values) > 0 {
+			groups = append(groups, linear.TeamProjects{TeamID: team.ID, Projects: values})
+		}
+	}
+	return groups, nil
 }
 
 func formatTime(value time.Time) string {

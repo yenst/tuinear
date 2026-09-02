@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 2
+const schemaVersion = 4
 
 func Open(path string) (*Store, error) {
 	path = strings.TrimSpace(path)
@@ -118,6 +118,42 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		if _, err := tx.ExecContext(ctx, createTeamWorkflowStatesTable); err != nil {
 			return fmt.Errorf("add team workflow states: %w", err)
 		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 2"); err != nil {
+			return fmt.Errorf("set cache schema version: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit cache migration: %w", err)
+		}
+		version = 2
+	}
+	if version == 2 {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin cache migration: %w", err)
+		}
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(ctx, createTeamProjectsTable); err != nil {
+			return fmt.Errorf("add team projects: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+			return fmt.Errorf("set cache schema version: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit cache migration: %w", err)
+		}
+		version = 3
+	}
+	if version == 3 {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin cache migration: %w", err)
+		}
+		defer tx.Rollback()
+		for _, statement := range []string{createWorkspaceLabelsTable, createTeamLabelsTable} {
+			if _, err := tx.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("add editable label metadata: %w", err)
+			}
+		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 			return fmt.Errorf("set cache schema version: %w", err)
 		}
@@ -182,6 +218,7 @@ var schemaStatements = []string{
         PRIMARY KEY (account_key, id),
         FOREIGN KEY (account_key) REFERENCES snapshots(account_key) ON DELETE CASCADE
     )`,
+	createTeamProjectsTable,
 	`CREATE TABLE issues (
         account_key TEXT NOT NULL,
         id TEXT NOT NULL,
@@ -208,6 +245,8 @@ var schemaStatements = []string{
         PRIMARY KEY (account_key, id),
         FOREIGN KEY (account_key) REFERENCES snapshots(account_key) ON DELETE CASCADE
     )`,
+	createWorkspaceLabelsTable,
+	createTeamLabelsTable,
 	`CREATE TABLE issue_labels (
         account_key TEXT NOT NULL,
         issue_id TEXT NOT NULL,
@@ -225,8 +264,11 @@ var schemaValidationQueries = []string{
 	"SELECT account_key, team_id, state_cache_id, position FROM team_workflow_states LIMIT 0",
 	"SELECT account_key, id, name, display_name FROM users LIMIT 0",
 	"SELECT account_key, id, name FROM projects LIMIT 0",
+	"SELECT account_key, team_id, project_id, position FROM team_projects LIMIT 0",
 	"SELECT account_key, id, identifier, title, description, priority, url, created_at, updated_at, state_id, assignee_id, team_id, project_id, position FROM issues LIMIT 0",
 	"SELECT account_key, id, name, color FROM labels LIMIT 0",
+	"SELECT account_key, label_id, position FROM workspace_labels LIMIT 0",
+	"SELECT account_key, team_id, label_id, position FROM team_labels LIMIT 0",
 	"SELECT account_key, issue_id, label_id, position FROM issue_labels LIMIT 0",
 }
 
@@ -238,6 +280,34 @@ const createTeamWorkflowStatesTable = `CREATE TABLE team_workflow_states (
         PRIMARY KEY (account_key, team_id, state_cache_id),
         FOREIGN KEY (account_key, team_id) REFERENCES teams(account_key, id) ON DELETE CASCADE,
         FOREIGN KEY (account_key, state_cache_id) REFERENCES workflow_states(account_key, cache_id) ON DELETE CASCADE
+    )`
+
+const createTeamProjectsTable = `CREATE TABLE team_projects (
+        account_key TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        PRIMARY KEY (account_key, team_id, project_id),
+        FOREIGN KEY (account_key, team_id) REFERENCES teams(account_key, id) ON DELETE CASCADE,
+        FOREIGN KEY (account_key, project_id) REFERENCES projects(account_key, id) ON DELETE CASCADE
+    )`
+
+const createWorkspaceLabelsTable = `CREATE TABLE workspace_labels (
+        account_key TEXT NOT NULL,
+        label_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        PRIMARY KEY (account_key, label_id),
+        FOREIGN KEY (account_key, label_id) REFERENCES labels(account_key, id) ON DELETE CASCADE
+    )`
+
+const createTeamLabelsTable = `CREATE TABLE team_labels (
+        account_key TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        label_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        PRIMARY KEY (account_key, team_id, label_id),
+        FOREIGN KEY (account_key, team_id) REFERENCES teams(account_key, id) ON DELETE CASCADE,
+        FOREIGN KEY (account_key, label_id) REFERENCES labels(account_key, id) ON DELETE CASCADE
     )`
 
 func quarantine(path string) (string, error) {

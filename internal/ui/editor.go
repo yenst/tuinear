@@ -27,6 +27,11 @@ type issueEditKind uint8
 const (
 	editTitle issueEditKind = iota
 	editStatus
+	editPriority
+	editAssignee
+	editProject
+	editLabels
+	editDescription
 )
 
 type pendingIssueEdit struct {
@@ -44,7 +49,11 @@ type issueUpdateFailedMsg struct {
 }
 
 func (m *Model) beginTitleEdit() {
-	if m.pendingEdit != nil {
+	if m.pendingEdit != nil || m.pendingArchive != nil {
+		if m.pendingArchive != nil {
+			m.editErr = fmt.Errorf("wait for %s to finish archiving", m.pendingArchive.identifier)
+			return
+		}
 		m.editErr = fmt.Errorf("wait for %s to finish saving", m.pendingEdit.identifier)
 		return
 	}
@@ -193,6 +202,16 @@ func (m *Model) rebasePendingIssueEdit() {
 				issue.Title = m.pendingEdit.optimistic.Title
 			case editStatus:
 				issue.State = m.pendingEdit.optimistic.State
+			case editPriority:
+				issue.Priority = m.pendingEdit.optimistic.Priority
+			case editAssignee:
+				issue.Assignee = m.pendingEdit.optimistic.Assignee
+			case editProject:
+				issue.Project = m.pendingEdit.optimistic.Project
+			case editLabels:
+				issue.Labels = append([]linear.Label(nil), m.pendingEdit.optimistic.Labels...)
+			case editDescription:
+				issue.Description = m.pendingEdit.optimistic.Description
 			}
 			issue.UpdatedAt = time.Now()
 			m.replaceIssue(issue)
@@ -202,6 +221,18 @@ func (m *Model) rebasePendingIssueEdit() {
 }
 
 func (m *Model) rebaseOpenEditors() {
+	if m.archiveConfirm != nil {
+		if _, ok := m.dashboardIssue(m.archiveConfirm.issueID); !ok {
+			m.archiveConfirm = nil
+			m.editErr = fmt.Errorf("the issue archive confirmation is no longer available")
+		}
+	}
+	if m.actionMenu != nil {
+		if _, ok := m.dashboardIssue(m.actionMenu.issueID); !ok {
+			m.actionMenu = nil
+			m.editErr = fmt.Errorf("the issue action menu is no longer available")
+		}
+	}
 	if m.editor != nil {
 		issue, ok := m.dashboardIssue(m.editor.issueID)
 		if !ok {
@@ -211,25 +242,44 @@ func (m *Model) rebaseOpenEditors() {
 			m.editor.original = issue
 		}
 	}
-	if m.statusEditor != nil {
-		issue, ok := m.dashboardIssue(m.statusEditor.issueID)
+	if m.choiceEditor != nil {
+		issue, ok := m.dashboardIssue(m.choiceEditor.issueID)
 		if !ok {
-			m.statusEditor = nil
+			m.choiceEditor = nil
 			m.editErr = fmt.Errorf("the issue being edited is no longer available")
 			return
 		}
-		selectedID := ""
-		if len(m.statusEditor.options) > 0 {
-			selectedID = m.statusEditor.options[m.statusEditor.selected].ID
+		selected := issueChoice{}
+		if len(m.choiceEditor.options) > 0 {
+			selected = m.choiceEditor.options[m.choiceEditor.selected]
 		}
-		m.statusEditor.original = issue
-		m.statusEditor.options = m.editableStates(issue)
-		m.statusEditor.selected = 0
-		for index, state := range m.statusEditor.options {
-			if state.ID == selectedID {
-				m.statusEditor.selected = index
+		m.choiceEditor.original = issue
+		switch m.choiceEditor.kind {
+		case editStatus:
+			m.choiceEditor.options = statusChoices(m.editableStates(issue))
+		case editAssignee:
+			m.choiceEditor.options = assigneeChoices(m.dashboard.Users, issue.Assignee)
+		case editProject:
+			m.choiceEditor.options = projectChoices(m.editableProjects(issue), issue.Project)
+		}
+		m.choiceEditor.selected = 0
+		for index, option := range m.choiceEditor.options {
+			if option.sameValue(selected, m.choiceEditor.kind) {
+				m.choiceEditor.selected = index
 				break
 			}
+		}
+	}
+	if m.labelEditor != nil {
+		m.rebaseLabelEditor()
+	}
+	if m.descriptionEditor != nil {
+		issue, ok := m.dashboardIssue(m.descriptionEditor.issueID)
+		if !ok {
+			m.descriptionEditor = nil
+			m.editErr = fmt.Errorf("the issue being edited is no longer available")
+		} else {
+			m.descriptionEditor.original = issue
 		}
 	}
 }

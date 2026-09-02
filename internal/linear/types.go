@@ -11,6 +11,10 @@ type Dashboard struct {
 	ActiveAccountID string
 	Teams           []Team
 	TeamStates      []TeamWorkflowStates
+	TeamProjects    []TeamProjects
+	WorkspaceLabels []Label
+	TeamLabels      []TeamLabels
+	Users           []User
 	Issues          []Issue
 }
 
@@ -82,10 +86,24 @@ type TeamWorkflowStates struct {
 	States []WorkflowState
 }
 
+type TeamProjects struct {
+	TeamID   string
+	Projects []Project
+}
+
 func (d Dashboard) StatesForTeam(teamID string) []WorkflowState {
 	for _, group := range d.TeamStates {
 		if group.TeamID == teamID {
 			return group.States
+		}
+	}
+	return nil
+}
+
+func (d Dashboard) ProjectsForTeam(teamID string) []Project {
+	for _, group := range d.TeamProjects {
+		if group.TeamID == teamID {
+			return group.Projects
 		}
 	}
 	return nil
@@ -115,6 +133,37 @@ type Label struct {
 	Color string `json:"color"`
 }
 
+type TeamLabels struct {
+	TeamID string
+	Labels []Label
+}
+
+func (d Dashboard) LabelsForTeam(teamID string) []Label {
+	seen := make(map[string]bool, len(d.WorkspaceLabels))
+	labels := make([]Label, 0, len(d.WorkspaceLabels))
+	for _, label := range d.WorkspaceLabels {
+		if label.ID == "" || seen[label.ID] {
+			continue
+		}
+		seen[label.ID] = true
+		labels = append(labels, label)
+	}
+	for _, group := range d.TeamLabels {
+		if group.TeamID != teamID {
+			continue
+		}
+		for _, label := range group.Labels {
+			if label.ID == "" || seen[label.ID] {
+				continue
+			}
+			seen[label.ID] = true
+			labels = append(labels, label)
+		}
+		break
+	}
+	return labels
+}
+
 type Issue struct {
 	ID          string        `json:"id"`
 	Identifier  string        `json:"identifier"`
@@ -134,11 +183,17 @@ type Issue struct {
 	} `json:"labels"`
 }
 
-// IssueUpdate contains only fields that Tuinear is allowed to mutate. Pointer
-// fields distinguish an omitted value from an explicitly empty value.
+// IssueUpdate contains only fields that Tuinear is allowed to mutate.
+// AssigneeID and ProjectID use two pointer levels so nil omits the field, while
+// a non-nil outer pointer containing nil explicitly sends null to clear it.
 type IssueUpdate struct {
-	Title   *string `json:"title,omitempty"`
-	StateID *string `json:"stateId,omitempty"`
+	Title       *string   `json:"title,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	StateID     *string   `json:"stateId,omitempty"`
+	Priority    *int      `json:"priority,omitempty"`
+	AssigneeID  **string  `json:"assigneeId,omitempty"`
+	ProjectID   **string  `json:"projectId,omitempty"`
+	LabelIDs    *[]string `json:"labelIds,omitempty"`
 }
 
 func (i *Issue) Normalize() {

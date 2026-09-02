@@ -18,10 +18,14 @@ const DefaultEndpoint = "https://api.linear.app/graphql"
 const dashboardQuery = `query TuinearDashboard($first: Int!) {
   viewer { id name displayName email }
   organization { id name urlKey }
+  users(first: $first) { nodes { id name displayName } }
+	issueLabels(first: $first) { nodes { id name color } }
   teams {
     nodes {
       id key name
       states { nodes { id name type color position } }
+	  projects(first: $first) { nodes { id name } }
+	  labels { nodes { id name color } }
     }
   }
   issues(first: $first, orderBy: updatedAt) {
@@ -48,6 +52,10 @@ const issueUpdateMutation = `mutation TuinearIssueUpdate($id: String!, $input: I
       labels { nodes { id name color } }
     }
   }
+}`
+
+const issueArchiveMutation = `mutation TuinearIssueArchive($id: String!) {
+  issueArchive(id: $id) { success }
 }`
 
 type HTTPDoer interface {
@@ -119,8 +127,20 @@ type dashboardData struct {
 			States struct {
 				Nodes []WorkflowState `json:"nodes"`
 			} `json:"states"`
+			Projects struct {
+				Nodes []Project `json:"nodes"`
+			} `json:"projects"`
+			Labels struct {
+				Nodes []Label `json:"nodes"`
+			} `json:"labels"`
 		} `json:"nodes"`
 	} `json:"teams"`
+	Users struct {
+		Nodes []User `json:"nodes"`
+	} `json:"users"`
+	IssueLabels struct {
+		Nodes []Label `json:"nodes"`
+	} `json:"issueLabels"`
 	Issues struct {
 		Nodes []Issue `json:"nodes"`
 	} `json:"issues"`
@@ -137,19 +157,36 @@ func (c *Client) FetchDashboard(ctx context.Context) (Dashboard, error) {
 	}
 	teams := make([]Team, 0, len(decoded.Teams.Nodes))
 	teamStates := make([]TeamWorkflowStates, 0, len(decoded.Teams.Nodes))
+	teamProjects := make([]TeamProjects, 0, len(decoded.Teams.Nodes))
+	teamLabels := make([]TeamLabels, 0, len(decoded.Teams.Nodes))
 	for _, team := range decoded.Teams.Nodes {
 		sort.SliceStable(team.States.Nodes, func(i, j int) bool {
 			return team.States.Nodes[i].Position < team.States.Nodes[j].Position
 		})
 		teams = append(teams, Team{ID: team.ID, Key: team.Key, Name: team.Name})
 		teamStates = append(teamStates, TeamWorkflowStates{TeamID: team.ID, States: team.States.Nodes})
+		sort.SliceStable(team.Projects.Nodes, func(i, j int) bool {
+			return strings.ToLower(team.Projects.Nodes[i].Name) < strings.ToLower(team.Projects.Nodes[j].Name)
+		})
+		teamProjects = append(teamProjects, TeamProjects{TeamID: team.ID, Projects: team.Projects.Nodes})
+		sort.SliceStable(team.Labels.Nodes, func(i, j int) bool {
+			return strings.ToLower(team.Labels.Nodes[i].Name) < strings.ToLower(team.Labels.Nodes[j].Name)
+		})
+		teamLabels = append(teamLabels, TeamLabels{TeamID: team.ID, Labels: team.Labels.Nodes})
 	}
+	sort.SliceStable(decoded.IssueLabels.Nodes, func(i, j int) bool {
+		return strings.ToLower(decoded.IssueLabels.Nodes[i].Name) < strings.ToLower(decoded.IssueLabels.Nodes[j].Name)
+	})
 	return Dashboard{
-		Viewer:       decoded.Viewer,
-		Organization: decoded.Organization,
-		Teams:        teams,
-		TeamStates:   teamStates,
-		Issues:       issues,
+		Viewer:          decoded.Viewer,
+		Organization:    decoded.Organization,
+		Teams:           teams,
+		TeamStates:      teamStates,
+		TeamProjects:    teamProjects,
+		WorkspaceLabels: decoded.IssueLabels.Nodes,
+		TeamLabels:      teamLabels,
+		Users:           decoded.Users.Nodes,
+		Issues:          issues,
 	}, nil
 }
 
@@ -158,7 +195,7 @@ func (c *Client) UpdateIssue(ctx context.Context, issueID string, update IssueUp
 	if issueID == "" {
 		return Issue{}, errors.New("Linear issue ID is empty")
 	}
-	if update.Title == nil && update.StateID == nil {
+	if update.Title == nil && update.Description == nil && update.StateID == nil && update.Priority == nil && update.AssigneeID == nil && update.ProjectID == nil && update.LabelIDs == nil {
 		return Issue{}, errors.New("Linear issue update has no fields")
 	}
 	if update.Title != nil {
@@ -175,6 +212,40 @@ func (c *Client) UpdateIssue(ctx context.Context, issueID string, update IssueUp
 		}
 		update.StateID = &stateID
 	}
+	if update.Priority != nil && (*update.Priority < 0 || *update.Priority > 4) {
+		return Issue{}, errors.New("Linear issue priority must be between 0 and 4")
+	}
+	if update.AssigneeID != nil && *update.AssigneeID != nil {
+		assigneeID := strings.TrimSpace(**update.AssigneeID)
+		if assigneeID == "" {
+			return Issue{}, errors.New("Linear assignee ID cannot be empty")
+		}
+		trimmed := &assigneeID
+		update.AssigneeID = &trimmed
+	}
+	if update.ProjectID != nil && *update.ProjectID != nil {
+		projectID := strings.TrimSpace(**update.ProjectID)
+		if projectID == "" {
+			return Issue{}, errors.New("Linear project ID cannot be empty")
+		}
+		trimmed := &projectID
+		update.ProjectID = &trimmed
+	}
+	if update.LabelIDs != nil {
+		seen := make(map[string]bool, len(*update.LabelIDs))
+		labelIDs := make([]string, 0, len(*update.LabelIDs))
+		for _, value := range *update.LabelIDs {
+			labelID := strings.TrimSpace(value)
+			if labelID == "" {
+				return Issue{}, errors.New("Linear label ID cannot be empty")
+			}
+			if !seen[labelID] {
+				seen[labelID] = true
+				labelIDs = append(labelIDs, labelID)
+			}
+		}
+		update.LabelIDs = &labelIDs
+	}
 	var decoded struct {
 		IssueUpdate struct {
 			Success bool  `json:"success"`
@@ -189,6 +260,25 @@ func (c *Client) UpdateIssue(ctx context.Context, issueID string, update IssueUp
 	}
 	decoded.IssueUpdate.Issue.Normalize()
 	return decoded.IssueUpdate.Issue, nil
+}
+
+func (c *Client) ArchiveIssue(ctx context.Context, issueID string) error {
+	issueID = strings.TrimSpace(issueID)
+	if issueID == "" {
+		return errors.New("Linear issue ID is empty")
+	}
+	var decoded struct {
+		IssueArchive struct {
+			Success bool `json:"success"`
+		} `json:"issueArchive"`
+	}
+	if err := c.graphQL(ctx, issueArchiveMutation, map[string]any{"id": issueID}, &decoded); err != nil {
+		return err
+	}
+	if !decoded.IssueArchive.Success {
+		return errors.New("Linear did not confirm the issue archive")
+	}
+	return nil
 }
 
 func (c *Client) graphQL(ctx context.Context, query string, variables map[string]any, target any) error {

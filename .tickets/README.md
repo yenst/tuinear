@@ -14,11 +14,18 @@ empty states are handled.
 | [004](004-search-and-filters.md) | DONE | Quickly narrow a large workspace |
 | [005](005-persistent-cache.md) | DONE | Instant and offline startup |
 | [009](009-open-issue-browser.md) | DONE | Open the selected issue in the default browser |
-| [007](007-editing.md) | IN PROGRESS | Edit safe issue fields |
+| [007](007-editing.md) | DONE | Edit safe issue fields |
 | [007a](007a-title-editing.md) | DONE | Optimistically edit and safely roll back issue titles |
 | [007b](007b-status-editing.md) | DONE | Move issues through team-specific workflow states |
-| [008](008-archive-and-delete.md) | DEFERRED | Confirmed destructive operations |
+| [007c](007c-priority-editing.md) | DONE | Change issue priority with optimistic rollback |
+| [007d](007d-issue-action-menu.md) | DONE | Discover issue actions from the Enter key |
+| [007e](007e-assignee-editing.md) | DONE | Assign or unassign issues safely |
+| [007f](007f-project-editing.md) | DONE | Move issues into or out of team projects safely |
+| [007g](007g-label-editing.md) | DONE | Apply or clear issue labels safely |
+| [007h](007h-description-editing.md) | DONE | Edit multiline issue descriptions safely |
+| [008](008-archive-and-delete.md) | DONE | Confirmed, recoverable issue archiving |
 
-The complete browsing experience includes OAuth profiles, local search,
-filters, offline caching, and browser links. Ticket 007 is now landing as
-small, independently tested edit slices; destructive ticket 008 remains last.
+The complete browsing and editing experience includes OAuth profiles, local
+search, filters, offline caching, browser links, guarded mutations, and
+confirmed recoverable archiving. Permanent deletion is deliberately not
+exposed.

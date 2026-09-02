@@ -76,3 +76,17 @@ func (l *accountLoader) UpdateIssue(ctx context.Context, issueID string, update 
 	}
 	return linear.NewOAuthClient(l.manager).UpdateIssue(ctx, issueID, update)
 }
+
+func (l *accountLoader) ArchiveIssue(ctx context.Context, issueID string) error {
+	if l == nil || l.manager == nil {
+		return fmt.Errorf("account loader is not configured")
+	}
+	granted, err := l.manager.HasScope("write")
+	if err != nil {
+		return fmt.Errorf("check Linear write access: %w", err)
+	}
+	if !granted {
+		return fmt.Errorf("this account is connected read-only; reconnect it with tuinear --login to grant write access")
+	}
+	return linear.NewOAuthClient(l.manager).ArchiveIssue(ctx, issueID)
+}

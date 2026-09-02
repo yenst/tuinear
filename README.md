@@ -1,8 +1,8 @@
 # Tuinear
 
 Tuinear is a fast, keyboard-first terminal client for browsing and safely
-editing Linear issues. Its completed read-only MVP makes tickets pleasant to
-scan; post-MVP editing now lands one guarded field at a time.
+editing Linear issues. It combines a focused three-pane browser with guarded
+field editing and recoverable issue archiving.
 
 ## MVP
 
@@ -18,11 +18,20 @@ scan; post-MVP editing now lands one guarded field at a time.
 - Multiple simultaneous workspace/user profiles for work and personal accounts
 - Instant cached startup with background refresh and offline fallback
 - Press `space` while browsing to open the selected issue's Linear URL in your default browser
+- Press `enter` to discover every action available for the selected issue
 - Edit the selected issue's title with `e`, including optimistic feedback and exact rollback on failure
 - Change the selected issue's team-specific status with `s`
+- Change the selected issue's priority with `p`
+- Assign or unassign the selected issue with `u`
+- Move the selected issue into or out of a team project with `P`
+- Apply or clear multiple labels with `l`
+- Edit multiline descriptions with `d`
+- Archive the selected issue with `x` after a focused confirmation that
+  defaults to cancellation
 
-Additional field editors are in progress. Archiving and deletion remain
-deferred. The implementation plan lives in [`.tickets`](.tickets/README.md).
+The editing and archive backlog is complete. Archive is recoverable from Linear;
+Tuinear deliberately does not expose permanent issue deletion. The
+implementation record lives in [`.tickets`](.tickets/README.md).
 
 ## OAuth setup
 
@@ -106,8 +115,15 @@ go run ./cmd/tuinear --snapshot
 | `tab` / `]` | Next team |
 | `shift+tab` / `[` | Previous team |
 | `a` / `A` | Next/previous account |
+| `enter` | Open the selected issue's action menu |
 | `e` | Edit the selected issue's title |
 | `s` | Change the selected issue's status |
+| `p` | Change the selected issue's priority |
+| `u` | Change the selected issue's assignee |
+| `P` | Change the selected issue's project |
+| `l` | Edit the selected issue's labels |
+| `d` | Edit the selected issue's multiline description |
+| `x` | Confirm and archive the selected issue (recoverable) |
 | `/` | Incremental search by identifier or title |
 | `f` / `ctrl+f` | Open the discoverable filter palette |
 | `space` | Open the selected issue in the default browser |

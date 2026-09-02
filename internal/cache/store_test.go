@@ -53,11 +53,17 @@ func TestStoreRoundTripUsesNormalizedTables(t *testing.T) {
 	if len(got.Accounts) != 0 || got.ActiveAccountID != "" {
 		t.Fatal("credential-store profile metadata must not be copied into SQLite")
 	}
-	if len(got.Teams) != len(want.Teams) || len(got.Issues) != len(want.Issues) {
-		t.Fatalf("round trip counts = %d teams/%d issues", len(got.Teams), len(got.Issues))
+	if len(got.Teams) != len(want.Teams) || len(got.Users) != len(want.Users) || len(got.Issues) != len(want.Issues) {
+		t.Fatalf("round trip counts = %d teams/%d users/%d issues", len(got.Teams), len(got.Users), len(got.Issues))
 	}
 	if gotStates := got.StatesForTeam(want.Teams[0].ID); len(gotStates) != len(want.StatesForTeam(want.Teams[0].ID)) || gotStates[0].ID == "" {
 		t.Fatalf("team workflow states did not round trip: %#v", got.TeamStates)
+	}
+	if gotProjects := got.ProjectsForTeam(want.Teams[0].ID); len(gotProjects) != len(want.ProjectsForTeam(want.Teams[0].ID)) || gotProjects[0].ID == "" {
+		t.Fatalf("team projects did not round trip: %#v", got.TeamProjects)
+	}
+	if gotLabels := got.LabelsForTeam(want.Teams[0].ID); len(gotLabels) != len(want.LabelsForTeam(want.Teams[0].ID)) || len(got.WorkspaceLabels) == 0 || len(got.TeamLabels) == 0 {
+		t.Fatalf("editable labels did not round trip: workspace=%#v teams=%#v", got.WorkspaceLabels, got.TeamLabels)
 	}
 	for index, issue := range want.Issues {
 		cached := got.Issues[index]
@@ -73,7 +79,7 @@ func TestStoreRoundTripUsesNormalizedTables(t *testing.T) {
 		}
 	}
 
-	for table, minimum := range map[string]int{"teams": 1, "workflow_states": 1, "team_workflow_states": 1, "users": 1, "projects": 1, "issues": 1, "labels": 1, "issue_labels": 1} {
+	for table, minimum := range map[string]int{"teams": 1, "workflow_states": 1, "team_workflow_states": 1, "users": 1, "projects": 1, "team_projects": 1, "issues": 1, "labels": 1, "workspace_labels": 1, "team_labels": 1, "issue_labels": 1} {
 		var count int
 		if err := store.db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+table).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -147,7 +153,7 @@ func TestOpenMigratesVersionOneDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range schemaStatements {
-		if statement == createTeamWorkflowStatesTable {
+		if statement == createTeamWorkflowStatesTable || statement == createTeamProjectsTable || statement == createWorkspaceLabelsTable || statement == createTeamLabelsTable {
 			continue
 		}
 		if _, err := db.Exec(statement); err != nil {
@@ -174,6 +180,95 @@ func TestOpenMigratesVersionOneDatabase(t *testing.T) {
 	}
 	if _, err := store.db.Exec("SELECT * FROM team_workflow_states LIMIT 0"); err != nil {
 		t.Fatalf("team workflow state table missing: %v", err)
+	}
+	if _, err := store.db.Exec("SELECT * FROM team_projects LIMIT 0"); err != nil {
+		t.Fatalf("team projects table missing: %v", err)
+	}
+	if _, err := store.db.Exec("SELECT * FROM workspace_labels LIMIT 0"); err != nil {
+		t.Fatalf("workspace labels table missing: %v", err)
+	}
+	if _, err := store.db.Exec("SELECT * FROM team_labels LIMIT 0"); err != nil {
+		t.Fatalf("team labels table missing: %v", err)
+	}
+}
+
+func TestOpenMigratesVersionTwoDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.sqlite3")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range schemaStatements {
+		if statement == createTeamProjectsTable || statement == createWorkspaceLabelsTable || statement == createTeamLabelsTable {
+			continue
+		}
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = 2"); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var version int
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("migrated version = %d, %v", version, err)
+	}
+	if _, err := store.db.Exec("SELECT * FROM team_projects LIMIT 0"); err != nil {
+		t.Fatalf("team projects table missing: %v", err)
+	}
+	if _, err := store.db.Exec("SELECT * FROM team_labels LIMIT 0"); err != nil {
+		t.Fatalf("team labels table missing: %v", err)
+	}
+}
+
+func TestOpenMigratesVersionThreeDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.sqlite3")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range schemaStatements {
+		if statement == createWorkspaceLabelsTable || statement == createTeamLabelsTable {
+			continue
+		}
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = 3"); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var version int
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("migrated version = %d, %v", version, err)
+	}
+	if _, err := store.db.Exec("SELECT * FROM workspace_labels LIMIT 0"); err != nil {
+		t.Fatalf("workspace labels table missing: %v", err)
+	}
+	if _, err := store.db.Exec("SELECT * FROM team_labels LIMIT 0"); err != nil {
+		t.Fatalf("team labels table missing: %v", err)
 	}
 }
 
