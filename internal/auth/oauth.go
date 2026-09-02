@@ -22,6 +22,7 @@ const (
 	DefaultAuthorizeURL = "https://linear.app/oauth/authorize"
 	DefaultTokenURL     = "https://api.linear.app/oauth/token"
 	DefaultRevokeURL    = "https://api.linear.app/oauth/revoke"
+	DefaultGraphQLURL   = "https://api.linear.app/graphql"
 	DefaultRedirectURI  = "http://127.0.0.1:14565/oauth/callback"
 )
 
@@ -39,19 +40,15 @@ type Token struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
-type Store interface {
-	Load() (Token, error)
-	Save(Token) error
-	Delete() error
-}
-
 type Manager struct {
 	clientID        string
 	redirectURI     string
 	authorizeURL    string
 	tokenURL        string
 	revokeURL       string
+	graphQLURL      string
 	store           Store
+	profileID       string
 	http            HTTPDoer
 	now             func() time.Time
 	callbackTimeout time.Duration
@@ -76,6 +73,14 @@ func WithStore(store Store) Option {
 	return func(m *Manager) { m.store = store }
 }
 
+func WithProfileID(profileID string) Option {
+	return func(m *Manager) { m.profileID = strings.TrimSpace(profileID) }
+}
+
+func WithGraphQLEndpoint(endpoint string) Option {
+	return func(m *Manager) { m.graphQLURL = endpoint }
+}
+
 func WithHTTPClient(client HTTPDoer) Option {
 	return func(m *Manager) { m.http = client }
 }
@@ -96,6 +101,7 @@ func NewManager(clientID string, options ...Option) *Manager {
 		authorizeURL:    DefaultAuthorizeURL,
 		tokenURL:        DefaultTokenURL,
 		revokeURL:       DefaultRevokeURL,
+		graphQLURL:      DefaultGraphQLURL,
 		store:           NewKeyringStore(clientID),
 		http:            &http.Client{Timeout: 20 * time.Second},
 		now:             time.Now,
@@ -115,13 +121,14 @@ func (m *Manager) Token(ctx context.Context) (string, error) {
 	if err := m.validate(); err != nil {
 		return "", err
 	}
-	token, err := m.store.Load()
-	if errors.Is(err, ErrTokenNotFound) {
+	session, err := m.store.Load(m.profileID)
+	if errors.Is(err, ErrTokenNotFound) || errors.Is(err, ErrProfileNotFound) {
 		return "", ErrNotLoggedIn
 	}
 	if err != nil {
 		return "", fmt.Errorf("load Linear credentials: %w", err)
 	}
+	token := session.Token
 	if token.AccessToken == "" {
 		return "", ErrNotLoggedIn
 	}
@@ -143,38 +150,62 @@ func (m *Manager) Token(ctx context.Context) (string, error) {
 	if refreshed.RefreshToken == "" {
 		refreshed.RefreshToken = token.RefreshToken
 	}
-	if err := m.store.Save(refreshed); err != nil {
+	session.Token = refreshed
+	if err := m.store.Save(session, false); err != nil {
 		return "", fmt.Errorf("save refreshed Linear credentials: %w", err)
 	}
 	return refreshed.AccessToken, nil
 }
 
+// HasScope reports whether the active profile's token grants an OAuth scope.
+// Linear can return scopes separated by spaces, commas, or both.
+func (m *Manager) HasScope(scope string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.validate(); err != nil {
+		return false, err
+	}
+	session, err := m.store.Load(m.profileID)
+	if err != nil {
+		return false, err
+	}
+	want := strings.ToLower(strings.TrimSpace(scope))
+	for _, granted := range strings.FieldsFunc(session.Token.Scope, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	}) {
+		if strings.EqualFold(granted, want) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Login starts a loopback callback, emits the authorization URL, and completes PKCE.
-func (m *Manager) Login(ctx context.Context, showURL func(string)) error {
+func (m *Manager) Login(ctx context.Context, showURL func(string)) (Profile, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if err := m.validate(); err != nil {
-		return err
+		return Profile{}, err
 	}
 	redirect, err := validateRedirectURI(m.redirectURI)
 	if err != nil {
-		return err
+		return Profile{}, err
 	}
 	state, err := randomURLToken(32)
 	if err != nil {
-		return fmt.Errorf("generate OAuth state: %w", err)
+		return Profile{}, fmt.Errorf("generate OAuth state: %w", err)
 	}
 	verifier, err := randomURLToken(48)
 	if err != nil {
-		return fmt.Errorf("generate PKCE verifier: %w", err)
+		return Profile{}, fmt.Errorf("generate PKCE verifier: %w", err)
 	}
 	challengeBytes := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(challengeBytes[:])
 
 	listener, err := net.Listen("tcp", redirect.Host)
 	if err != nil {
-		return fmt.Errorf("start OAuth callback on %s: %w", redirect.Host, err)
+		return Profile{}, fmt.Errorf("start OAuth callback on %s: %w", redirect.Host, err)
 	}
 	defer listener.Close()
 
@@ -221,7 +252,7 @@ func (m *Manager) Login(ctx context.Context, showURL func(string)) error {
 
 	authorizeURL, err := m.authorizationURL(state, challenge)
 	if err != nil {
-		return err
+		return Profile{}, err
 	}
 	if showURL != nil {
 		showURL(authorizeURL)
@@ -229,7 +260,7 @@ func (m *Manager) Login(ctx context.Context, showURL func(string)) error {
 
 	code, err := waitForCallback(ctx, m.callbackTimeout, callback, serveErr)
 	if err != nil {
-		return err
+		return Profile{}, err
 	}
 
 	token, err := m.requestToken(ctx, url.Values{
@@ -240,12 +271,17 @@ func (m *Manager) Login(ctx context.Context, showURL func(string)) error {
 		"code_verifier": {verifier},
 	})
 	if err != nil {
-		return fmt.Errorf("exchange Linear authorization code: %w", err)
+		return Profile{}, fmt.Errorf("exchange Linear authorization code: %w", err)
 	}
-	if err := m.store.Save(token); err != nil {
-		return fmt.Errorf("save Linear credentials: %w", err)
+	profile, err := m.fetchProfile(ctx, token.AccessToken)
+	if err != nil {
+		return Profile{}, fmt.Errorf("identify Linear account: %w", err)
 	}
-	return nil
+	if err := m.store.Save(Session{Profile: profile, Token: token}, true); err != nil {
+		return Profile{}, fmt.Errorf("save Linear credentials: %w", err)
+	}
+	m.profileID = profile.ID
+	return profile, nil
 }
 
 func (m *Manager) Logout(ctx context.Context) error {
@@ -255,13 +291,24 @@ func (m *Manager) Logout(ctx context.Context) error {
 	if err := m.validate(); err != nil {
 		return err
 	}
-	token, err := m.store.Load()
+	session, err := m.store.Load(m.profileID)
+	if errors.Is(err, ErrProfileNotFound) {
+		return nil
+	}
 	if errors.Is(err, ErrTokenNotFound) {
+		profileID := m.profileID
+		if profileID == "" {
+			profileID, _ = m.store.Active()
+		}
+		if profileID != "" {
+			return m.store.Delete(profileID)
+		}
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("load Linear credentials: %w", err)
 	}
+	token := session.Token
 	revokeToken := token.RefreshToken
 	hint := "refresh_token"
 	if revokeToken == "" {
@@ -273,7 +320,7 @@ func (m *Manager) Logout(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := m.store.Delete(); err != nil && !errors.Is(err, ErrTokenNotFound) {
+	if err := m.store.Delete(session.Profile.ID); err != nil && !errors.Is(err, ErrTokenNotFound) && !errors.Is(err, ErrProfileNotFound) {
 		return fmt.Errorf("delete Linear credentials: %w", err)
 	}
 	return nil
@@ -288,12 +335,134 @@ func (m *Manager) authorizationURL(state, challenge string) (string, error) {
 	query.Set("response_type", "code")
 	query.Set("client_id", m.clientID)
 	query.Set("redirect_uri", m.redirectURI)
-	query.Set("scope", "read")
+	query.Set("scope", "read,write")
+	query.Set("prompt", "consent")
 	query.Set("state", state)
 	query.Set("code_challenge", challenge)
 	query.Set("code_challenge_method", "S256")
 	u.RawQuery = query.Encode()
 	return u.String(), nil
+}
+
+func (m *Manager) Profiles() ([]Profile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.validate(); err != nil {
+		return nil, err
+	}
+	return m.store.List()
+}
+
+func (m *Manager) ActiveProfile() (Profile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.validate(); err != nil {
+		return Profile{}, err
+	}
+	session, err := m.store.Load(m.profileID)
+	if err != nil {
+		return Profile{}, err
+	}
+	return session.Profile, nil
+}
+
+func (m *Manager) ActiveProfileID() (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.validate(); err != nil {
+		return "", err
+	}
+	return m.store.Active()
+}
+
+func (m *Manager) SelectProfile(profileID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.validate(); err != nil {
+		return err
+	}
+	if err := m.store.SetActive(profileID); err != nil {
+		return err
+	}
+	m.profileID = profileID
+	return nil
+}
+
+const profileQuery = `query TuinearOAuthProfile {
+  viewer { id name displayName email }
+  organization { id name urlKey }
+}`
+
+func (m *Manager) fetchProfile(ctx context.Context, accessToken string) (Profile, error) {
+	payload, err := json.Marshal(struct {
+		Query string `json:"query"`
+	}{Query: profileQuery})
+	if err != nil {
+		return Profile{}, fmt.Errorf("encode account identity request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.graphQLURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return Profile{}, fmt.Errorf("create account identity request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Tuinear/0.1")
+	resp, err := m.http.Do(req)
+	if err != nil {
+		return Profile{}, fmt.Errorf("contact Linear GraphQL API: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return Profile{}, fmt.Errorf("read account identity response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return Profile{}, fmt.Errorf("Linear GraphQL API returned HTTP %d", resp.StatusCode)
+	}
+	var decoded struct {
+		Data struct {
+			Viewer struct {
+				ID          string `json:"id"`
+				Name        string `json:"name"`
+				DisplayName string `json:"displayName"`
+				Email       string `json:"email"`
+			} `json:"viewer"`
+			Organization struct {
+				ID     string `json:"id"`
+				Name   string `json:"name"`
+				URLKey string `json:"urlKey"`
+			} `json:"organization"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return Profile{}, fmt.Errorf("decode account identity response: %w", err)
+	}
+	if len(decoded.Errors) > 0 {
+		return Profile{}, fmt.Errorf("Linear GraphQL error: %s", decoded.Errors[0].Message)
+	}
+	if decoded.Data.Viewer.ID == "" || decoded.Data.Organization.ID == "" {
+		return Profile{}, errors.New("Linear did not return a workspace and user identity")
+	}
+	userName := decoded.Data.Viewer.DisplayName
+	if userName == "" {
+		userName = decoded.Data.Viewer.Name
+	}
+	return Profile{
+		ID:            profileID(decoded.Data.Organization.ID, decoded.Data.Viewer.ID),
+		UserID:        decoded.Data.Viewer.ID,
+		UserName:      userName,
+		UserEmail:     decoded.Data.Viewer.Email,
+		WorkspaceID:   decoded.Data.Organization.ID,
+		WorkspaceName: decoded.Data.Organization.Name,
+		WorkspaceKey:  decoded.Data.Organization.URLKey,
+	}, nil
 }
 
 func (m *Manager) requestToken(ctx context.Context, values url.Values) (Token, error) {

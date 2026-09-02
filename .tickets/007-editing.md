@@ -1,6 +1,6 @@
 # 007 — Safe issue editing
 
-Status: DEFERRED
+Status: IN PROGRESS
 
 ## User goal
 
@@ -8,7 +8,9 @@ Update common issue fields after the read experience is proven reliable.
 
 ## Planned behavior
 
-- Edit title, status, assignee, priority, labels, project, and description.
+- [x] Edit title.
+- [x] Edit status.
+- [ ] Edit assignee, priority, labels, project, and description.
 - Apply optimistic updates with visible pending state and rollback on failure.
 - Prevent accidental double submission.
 
@@ -22,3 +24,9 @@ Update common issue fields after the read experience is proven reliable.
 
 Tickets 001–006 must be complete first.
 
+## Delivered foundation
+
+Tickets 007a–007b added the authenticated `issueUpdate` contract, optimistic
+title and team-specific status editors, exact rollback, double-submit
+protection, and confirmed-only cache updates. The remaining field editors will
+reuse this mutation pipeline.

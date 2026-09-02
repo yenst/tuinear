@@ -1,6 +1,6 @@
 # 004 — Search and richer filters
 
-Status: READY
+Status: DONE
 
 ## User goal
 
@@ -19,3 +19,11 @@ Reach a known issue in seconds even in a large workspace.
 - Filter composition has table-driven tests.
 - Empty results preserve the query and explain how to clear it.
 
+## Delivered
+
+- `/` opens incremental local search over issue identifiers and titles.
+- `f` opens a discoverable palette for assignee, status, priority, and project;
+  selected values compose with one another.
+- The search query and active filters remain visible, and `esc` clears an
+  active query/filter state before closing search. Empty results explain how
+  to clear the view.

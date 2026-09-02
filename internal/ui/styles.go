@@ -41,9 +41,10 @@ var (
 	brandStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(theme.accent)
-	mutedStyle       = lipgloss.NewStyle().Foreground(theme.muted)
-	accentStyle      = lipgloss.NewStyle().Foreground(theme.accent)
-	selectedRowStyle = lipgloss.NewStyle().
+	mutedStyle         = lipgloss.NewStyle().Foreground(theme.muted)
+	accentStyle        = lipgloss.NewStyle().Foreground(theme.accent)
+	activeAccountStyle = lipgloss.NewStyle().Foreground(theme.green).Bold(true)
+	selectedRowStyle   = lipgloss.NewStyle().
 				Background(theme.selected).
 				Foreground(theme.text).
 				Bold(true)

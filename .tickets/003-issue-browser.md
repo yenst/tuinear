@@ -4,8 +4,7 @@ Status: DONE
 
 ## User goal
 
-Scan Linear tickets quickly and inspect the selected ticket without opening a
-browser.
+Scan Linear tickets quickly and inspect the selected ticket.
 
 ## Behavior
 
@@ -22,4 +21,3 @@ browser.
 - Changing teams resets selection and never shows a ticket from another team.
 - The screen identifies the active team and total visible issue count.
 - Demo data exercises completed, started, backlog, urgent, and unassigned states.
-

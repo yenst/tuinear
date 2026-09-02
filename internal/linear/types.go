@@ -2,11 +2,48 @@ package linear
 
 import "time"
 
-// Dashboard is the read-only workspace data needed by the MVP.
+// Dashboard is the workspace data needed by Tuinear's issue browser and safe
+// field editors.
 type Dashboard struct {
-	Viewer Viewer
-	Teams  []Team
-	Issues []Issue
+	Viewer          Viewer
+	Organization    Organization
+	Accounts        []Account
+	ActiveAccountID string
+	Teams           []Team
+	TeamStates      []TeamWorkflowStates
+	Issues          []Issue
+}
+
+type Account struct {
+	ID            string
+	WorkspaceName string
+	WorkspaceKey  string
+	UserName      string
+	UserEmail     string
+}
+
+func (a Account) Label() string {
+	workspace := a.WorkspaceName
+	if workspace == "" {
+		workspace = a.WorkspaceKey
+	}
+	user := a.UserName
+	if user == "" {
+		user = a.UserEmail
+	}
+	if workspace == "" {
+		return user
+	}
+	if user == "" {
+		return workspace
+	}
+	return workspace + " / " + user
+}
+
+type Organization struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	URLKey string `json:"urlKey"`
 }
 
 type Viewer struct {
@@ -33,10 +70,25 @@ type Team struct {
 }
 
 type WorkflowState struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Type  string `json:"type"`
-	Color string `json:"color"`
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Type     string  `json:"type"`
+	Color    string  `json:"color"`
+	Position float64 `json:"position"`
+}
+
+type TeamWorkflowStates struct {
+	TeamID string
+	States []WorkflowState
+}
+
+func (d Dashboard) StatesForTeam(teamID string) []WorkflowState {
+	for _, group := range d.TeamStates {
+		if group.TeamID == teamID {
+			return group.States
+		}
+	}
+	return nil
 }
 
 type User struct {
@@ -80,6 +132,13 @@ type Issue struct {
 	LabelData   struct {
 		Nodes []Label `json:"nodes"`
 	} `json:"labels"`
+}
+
+// IssueUpdate contains only fields that Tuinear is allowed to mutate. Pointer
+// fields distinguish an omitted value from an explicitly empty value.
+type IssueUpdate struct {
+	Title   *string `json:"title,omitempty"`
+	StateID *string `json:"stateId,omitempty"`
 }
 
 func (i *Issue) Normalize() {

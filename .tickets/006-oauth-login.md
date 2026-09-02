@@ -26,4 +26,6 @@ Sign in without manually creating or exporting an API key.
 - Access tokens refresh one minute before expiry and rotated refresh tokens are
   saved atomically by the operating-system credential store.
 - `tuinear --logout` revokes the refresh token before removing it locally.
-- Only the read-only OAuth scope is requested for the MVP.
+- Only Linear's `read` and `write` OAuth scopes are requested; privileged scopes
+  such as `admin` are never requested. The `write` scope is used only by explicit
+  post-MVP edit commands.
