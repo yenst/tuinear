@@ -1,4 +1,4 @@
-module github.com/jihmy/tuinear
+module github.com/yenst/tuinear
 
 go 1.26.0
 

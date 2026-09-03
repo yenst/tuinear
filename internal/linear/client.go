@@ -37,7 +37,7 @@ const dashboardTeamDetailsQuery = `query TuinearDashboardTeamDetails($teamID: St
 const dashboardIssuesQuery = `query TuinearDashboardIssues($first: Int!, $nestedFirst: Int!) {
   issues(first: $first, orderBy: updatedAt) {
     nodes {
-      id identifier title description priority url createdAt updatedAt
+      id identifier title description priority url branchName createdAt updatedAt
       state { id name type color }
       assignee { id name displayName }
       team { id key name }
@@ -51,7 +51,7 @@ const issueUpdateMutation = `mutation TuinearIssueUpdate($id: String!, $input: I
   issueUpdate(id: $id, input: $input) {
     success
     issue {
-      id identifier title description priority url createdAt updatedAt
+      id identifier title description priority url branchName createdAt updatedAt
       state { id name type color }
       assignee { id name displayName }
       team { id key name }

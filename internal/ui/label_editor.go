@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jihmy/tuinear/internal/linear"
+	"github.com/yenst/tuinear/internal/linear"
 )
 
 type labelEditor struct {

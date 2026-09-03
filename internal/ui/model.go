@@ -10,8 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jihmy/tuinear/internal/browser"
-	"github.com/jihmy/tuinear/internal/linear"
+	"github.com/yenst/tuinear/internal/browser"
+	"github.com/yenst/tuinear/internal/linear"
 )
 
 type DashboardLoader interface {
@@ -48,7 +48,22 @@ type accountDashboardLoadedMsg struct {
 type issueBrowserOpenedMsg struct{}
 type issueBrowserFailedMsg struct{ err error }
 
+type issueCopyKind string
+
+const (
+	issueCopyBranch issueCopyKind = "git branch"
+	issueCopyURL    issueCopyKind = "issue URL"
+)
+
+type issueCopiedMsg struct {
+	kind       issueCopyKind
+	identifier string
+	value      string
+}
+type issueCopyFailedMsg struct{ err error }
+
 type BrowserOpener func(string) error
+type ClipboardSetter func(string) tea.Cmd
 
 type Model struct {
 	loader                   DashboardLoader
@@ -73,6 +88,9 @@ type Model struct {
 	refreshErr               error
 	browserOpen              BrowserOpener
 	browserErr               error
+	clipboardSet             ClipboardSetter
+	clipboardErr             error
+	clipboardNotice          string
 	issueUpdater             IssueUpdater
 	issueArchiver            IssueArchiver
 	editor                   *titleEditor
@@ -93,7 +111,7 @@ type Model struct {
 }
 
 func New(loader DashboardLoader) Model {
-	m := Model{loader: loader, width: 120, height: 34, loading: true, browserOpen: browser.Open}
+	m := Model{loader: loader, width: 120, height: 34, loading: true, browserOpen: browser.Open, clipboardSet: tea.SetClipboard}
 	if updater, ok := loader.(IssueUpdater); ok {
 		m.issueUpdater = updater
 	}
@@ -107,7 +125,7 @@ func New(loader DashboardLoader) Model {
 }
 
 func NewWithDashboard(dashboard linear.Dashboard) Model {
-	m := Model{width: 120, height: 34, browserOpen: browser.Open}
+	m := Model{width: 120, height: 34, browserOpen: browser.Open, clipboardSet: tea.SetClipboard}
 	m.applyDashboard(dashboard)
 	return m
 }
@@ -126,6 +144,21 @@ func NewWithDashboardAndUpdater(dashboard linear.Dashboard, updater IssueUpdater
 func NewWithBrowser(loader DashboardLoader, opener BrowserOpener) Model {
 	m := New(loader)
 	m.browserOpen = opener
+	return m
+}
+
+// NewWithClipboard is intended for callers that need to provide an alternate
+// clipboard implementation, such as tests or an embedding application.
+func NewWithClipboard(loader DashboardLoader, setter ClipboardSetter) Model {
+	m := New(loader)
+	m.clipboardSet = setter
+	return m
+}
+
+// NewWithDashboardAndClipboard is the dashboard equivalent of NewWithClipboard.
+func NewWithDashboardAndClipboard(dashboard linear.Dashboard, setter ClipboardSetter) Model {
+	m := NewWithDashboard(dashboard)
+	m.clipboardSet = setter
 	return m
 }
 
@@ -198,6 +231,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case issueBrowserFailedMsg:
 		m.browserErr = msg.err
+		return m, nil
+	case issueCopiedMsg:
+		m.clipboardErr = nil
+		m.clipboardNotice = fmt.Sprintf("Copied %s for %s", msg.kind, msg.identifier)
+		if m.clipboardSet == nil {
+			return m, nil
+		}
+		return m, m.clipboardSet(msg.value)
+	case issueCopyFailedMsg:
+		m.clipboardNotice = ""
+		m.clipboardErr = msg.err
 		return m, nil
 	case issueUpdatedMsg:
 		m.finishIssueEdit(msg.issue)
@@ -322,7 +366,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveSelection(-1)
 		case keyMatches(msg, "g", "home"):
 			m.selected = 0
-		case keyMatches(msg, "G", "shift+g", "end"):
+		case keyMatches(msg, "G", "shift+g"):
+			return m, m.copySelectedIssue(issueCopyBranch)
+		case keyMatches(msg, "c"):
+			return m, m.copySelectedIssue(issueCopyURL)
+		case keyMatches(msg, "end"):
 			if len(m.issues) > 0 {
 				m.selected = len(m.issues) - 1
 			}
@@ -333,6 +381,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) copySelectedIssue(kind issueCopyKind) tea.Cmd {
+	issue := m.selectedIssue()
+	if issue == nil {
+		return issueCopyFailure(kind, "no issue is selected")
+	}
+	value := issue.URL
+	if kind == issueCopyBranch {
+		value = issue.BranchName
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return issueCopyFailure(kind, fmt.Sprintf("selected issue has no %s", kind))
+	}
+	if m.clipboardSet == nil {
+		return issueCopyFailure(kind, "clipboard is not configured")
+	}
+	m.clipboardErr = nil
+	m.clipboardNotice = ""
+	identifier := issue.Identifier
+	return func() tea.Msg {
+		return issueCopiedMsg{kind: kind, identifier: identifier, value: value}
+	}
+}
+
+func issueCopyFailure(kind issueCopyKind, reason string) tea.Cmd {
+	return func() tea.Msg {
+		return issueCopyFailedMsg{err: fmt.Errorf("copy %s: %s", kind, reason)}
+	}
 }
 
 func keyMatches(msg tea.KeyPressMsg, names ...string) bool {

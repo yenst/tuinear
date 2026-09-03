@@ -255,6 +255,12 @@ func (m Model) renderFooter(width int) string {
 		help := "Browser: " + m.browserErr.Error() + "  ·  space retries"
 		return footer(help)
 	}
+	if m.clipboardErr != nil {
+		return footer("Clipboard: " + m.clipboardErr.Error() + "  ·  G branch  ·  c URL")
+	}
+	if m.clipboardNotice != "" {
+		return footer(m.clipboardNotice + "  ·  G branch  ·  c URL")
+	}
 	if m.filterErr != nil {
 		help := "Filters: " + m.filterErr.Error() + "  ·  change a filter to retry saving"
 		return lipgloss.NewStyle().Foreground(theme.red).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
@@ -262,5 +268,5 @@ func (m Model) renderFooter(width int) string {
 	if m.refreshErr != nil {
 		return footer("Refresh: " + m.refreshErr.Error() + "  ·  r retry  ·  a/A account  ·  h help")
 	}
-	return footer("h help  ·  enter actions  ·  / search  ·  f filters  ·  a/A account  ·  r refresh  ·  q quit")
+	return footer("h help  ·  enter actions  ·  / search  ·  f filters  ·  G branch  ·  c URL  ·  q quit")
 }

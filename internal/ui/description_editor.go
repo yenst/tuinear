@@ -9,7 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jihmy/tuinear/internal/linear"
+	"github.com/yenst/tuinear/internal/linear"
 )
 
 type descriptionEditor struct {

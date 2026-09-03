@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jihmy/tuinear/internal/linear"
+	"github.com/yenst/tuinear/internal/linear"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -68,7 +68,7 @@ func TestStoreRoundTripUsesNormalizedTables(t *testing.T) {
 	for index, issue := range want.Issues {
 		cached := got.Issues[index]
 		if cached.ID != issue.ID || cached.Identifier != issue.Identifier || cached.Title != issue.Title ||
-			cached.State != issue.State || cached.Team != issue.Team || !cached.UpdatedAt.Equal(issue.UpdatedAt) {
+			cached.State != issue.State || cached.Team != issue.Team || cached.BranchName != issue.BranchName || !cached.UpdatedAt.Equal(issue.UpdatedAt) {
 			t.Fatalf("issue %d did not round trip: %#v", index, cached)
 		}
 		if (cached.Assignee == nil) != (issue.Assignee == nil) || (cached.Project == nil) != (issue.Project == nil) {
@@ -306,6 +306,44 @@ func TestOpenMigratesVersionFourDatabase(t *testing.T) {
 	}
 	if _, err := store.db.Exec("SELECT * FROM issue_filter_preferences LIMIT 0"); err != nil {
 		t.Fatalf("issue filter preferences table missing: %v", err)
+	}
+}
+
+func TestOpenMigratesVersionFiveDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.sqlite3")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range schemaStatements {
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec("ALTER TABLE issues DROP COLUMN branch_name"); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 5"); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var version int
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("migrated version = %d, %v", version, err)
+	}
+	if _, err := store.db.Exec("SELECT branch_name FROM issues LIMIT 0"); err != nil {
+		t.Fatalf("issue branch name column missing: %v", err)
 	}
 }
 

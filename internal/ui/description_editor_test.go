@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jihmy/tuinear/internal/linear"
+	"github.com/yenst/tuinear/internal/linear"
 )
 
 func TestDescriptionEditorOpensAndCancelsWithoutMutation(t *testing.T) {

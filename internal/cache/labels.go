@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/jihmy/tuinear/internal/linear"
+	"github.com/yenst/tuinear/internal/linear"
 )
 
 func loadLabels(ctx context.Context, db *sql.DB, accountKey string) (map[string]linear.Label, error) {

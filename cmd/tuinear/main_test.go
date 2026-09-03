@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jihmy/tuinear/internal/auth"
+	"github.com/yenst/tuinear/internal/auth"
 )
 
 func TestRunVersion(t *testing.T) {

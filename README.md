@@ -25,6 +25,8 @@ field editing and recoverable issue archiving.
 - Terminal-native ANSI colors that follow the active terminal theme, plus an
   explicit `Tuinear` window/tab title
 - Press `space` while browsing to open the selected issue's Linear URL in your default browser
+- Press `G` while browsing to copy the selected issue's suggested git branch name
+- Press `c` while browsing to copy the selected issue's Linear URL
 - Press `enter` to discover every action available for the selected issue
 - Edit the selected issue's title with `e`, including optimistic feedback and exact rollback on failure
 - Change the selected issue's team-specific status with `s`
@@ -67,9 +69,21 @@ The client ID is public configuration, not a secret. Developers can override it
 with `TUINEAR_OAUTH_CLIENT_ID` or with
 `-ldflags "-X main.oauthClientID=YOUR_CLIENT_ID"`.
 
-## Run
+## Installation
 
-Requires Go 1.26 or newer.
+Requires Go 1.26 or newer. Install the latest release with:
+
+```sh
+go install github.com/yenst/tuinear/cmd/tuinear@latest
+```
+
+Make sure Go's bin directory is on your `PATH`, then launch Tuinear with:
+
+```sh
+tuinear
+```
+
+## Run from source
 
 ```sh
 go run ./cmd/tuinear
@@ -126,11 +140,13 @@ go run ./cmd/tuinear --snapshot
 | `j` / `down` | Next issue |
 | `k` / `up` | Previous issue |
 | `g` / `home` | First issue |
-| `G` / `end` | Last issue |
+| `G` | Copy the selected issue's git branch name |
+| `end` | Last issue |
 | `tab` / `]` | Next team |
 | `shift+tab` / `[` | Previous team |
 | `a` / `A` | Next/previous account |
 | `enter` | Open the selected issue's action menu |
+| `c` | Copy the selected issue's Linear URL |
 | `e` | Edit the selected issue's title |
 | `s` | Change the selected issue's status |
 | `p` | Change the selected issue's priority |

@@ -12,11 +12,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jihmy/tuinear/internal/auth"
-	"github.com/jihmy/tuinear/internal/browser"
-	cachepkg "github.com/jihmy/tuinear/internal/cache"
-	"github.com/jihmy/tuinear/internal/linear"
-	"github.com/jihmy/tuinear/internal/ui"
+	"github.com/yenst/tuinear/internal/auth"
+	"github.com/yenst/tuinear/internal/browser"
+	cachepkg "github.com/yenst/tuinear/internal/cache"
+	"github.com/yenst/tuinear/internal/linear"
+	"github.com/yenst/tuinear/internal/ui"
 )
 
 var (

@@ -63,7 +63,7 @@ func TestFetchDashboard(t *testing.T) {
 			response = `{"data": {
             "issues": {"nodes":[{
               "id":"i1","identifier":"ENG-1","title":"First ticket","description":"Details",
-              "priority":2,"url":"https://linear.app/i1",
+              "priority":2,"url":"https://linear.app/i1","branchName":"eng-first-ticket",
               "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z",
               "state":{"id":"s1","name":"Todo","type":"unstarted","color":"#fff"},
               "assignee":null,"team":{"id":"t1","key":"ENG","name":"Engineering"},
@@ -116,6 +116,9 @@ func TestFetchDashboard(t *testing.T) {
 	}
 	if got := dashboard.Issues[0].Labels; len(got) != 1 || got[0].Name != "bug" {
 		t.Fatalf("labels were not normalized: %#v", got)
+	}
+	if got := dashboard.Issues[0].BranchName; got != "eng-first-ticket" {
+		t.Fatalf("branch name = %q, want %q", got, "eng-first-ticket")
 	}
 	if got := dashboard.StatesForTeam("t1"); len(got) != 2 || got[0].ID != "s1" {
 		t.Fatalf("team workflow states = %#v", got)

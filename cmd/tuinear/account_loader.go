@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jihmy/tuinear/internal/auth"
-	"github.com/jihmy/tuinear/internal/linear"
+	"github.com/yenst/tuinear/internal/auth"
+	"github.com/yenst/tuinear/internal/linear"
 )
 
 type accountLoader struct {

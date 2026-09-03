@@ -42,7 +42,8 @@ func helpColumns(width int) ([]string, []string) {
 	left := []string{
 		accentStyle.Bold(true).Render("Navigate"),
 		helpBinding("j / k", "next / previous issue", width),
-		helpBinding("g / G", "first / last issue", width),
+		helpBinding("g", "first issue", width),
+		helpBinding("end", "last issue", width),
 		helpBinding("tab / shift+tab", "next / previous team", width),
 		helpBinding("a / A", "next / previous account", width),
 		"",
@@ -58,6 +59,8 @@ func helpColumns(width int) ([]string, []string) {
 		helpBinding("u / P / l", "assignee / project / labels", width),
 		helpBinding("d", "description", width),
 		helpBinding("space", "open in Linear", width),
+		helpBinding("G", "copy git branch", width),
+		helpBinding("c", "copy issue URL", width),
 		helpBinding("x", "archive (with confirmation)", width),
 		"",
 		accentStyle.Bold(true).Render("General"),

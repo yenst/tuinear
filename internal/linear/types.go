@@ -171,6 +171,7 @@ type Issue struct {
 	Description string        `json:"description"`
 	Priority    int           `json:"priority"`
 	URL         string        `json:"url"`
+	BranchName  string        `json:"branchName"`
 	CreatedAt   time.Time     `json:"createdAt"`
 	UpdatedAt   time.Time     `json:"updatedAt"`
 	State       WorkflowState `json:"state"`

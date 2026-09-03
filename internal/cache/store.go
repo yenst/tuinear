@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jihmy/tuinear/internal/linear"
+	"github.com/yenst/tuinear/internal/linear"
 )
 
 var ErrNotFound = errors.New("cached dashboard not found")
@@ -224,8 +224,9 @@ func (s *Store) Save(ctx context.Context, accountKey string, dashboard linear.Da
 		if issue.Project != nil {
 			projectID = issue.Project.ID
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO issues VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			accountKey, issue.ID, issue.Identifier, issue.Title, issue.Description, issue.Priority, issue.URL,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO issues (account_key, id, identifier, title, description, priority, url, branch_name, created_at, updated_at, state_id, assignee_id, team_id, project_id, position)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			accountKey, issue.ID, issue.Identifier, issue.Title, issue.Description, issue.Priority, issue.URL, issue.BranchName,
 			formatTime(issue.CreatedAt), formatTime(issue.UpdatedAt), workflowStateKey(issue.State), assigneeID, issue.Team.ID, projectID, position); err != nil {
 			return fmt.Errorf("store cached issues: %w", err)
 		}
@@ -321,7 +322,7 @@ func (s *Store) Load(ctx context.Context, accountKey string) (linear.Dashboard, 
 		teamByID[team.ID] = team
 	}
 
-	rows, err = s.db.QueryContext(ctx, `SELECT id, identifier, title, description, priority, url, created_at, updated_at,
+	rows, err = s.db.QueryContext(ctx, `SELECT id, identifier, title, description, priority, url, branch_name, created_at, updated_at,
         state_id, assignee_id, team_id, project_id FROM issues WHERE account_key = ? ORDER BY position`, accountKey)
 	if err != nil {
 		return linear.Dashboard{}, time.Time{}, fmt.Errorf("load cached issues: %w", err)
@@ -332,7 +333,7 @@ func (s *Store) Load(ctx context.Context, accountKey string) (linear.Dashboard, 
 		var createdAt, updatedAt string
 		var assigneeID, projectID sql.NullString
 		var stateID, teamID string
-		if err := rows.Scan(&issue.ID, &issue.Identifier, &issue.Title, &issue.Description, &issue.Priority, &issue.URL,
+		if err := rows.Scan(&issue.ID, &issue.Identifier, &issue.Title, &issue.Description, &issue.Priority, &issue.URL, &issue.BranchName,
 			&createdAt, &updatedAt, &stateID, &assigneeID, &teamID, &projectID); err != nil {
 			return linear.Dashboard{}, time.Time{}, fmt.Errorf("read cached issue: %w", err)
 		}

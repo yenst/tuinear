@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jihmy/tuinear/internal/issuefilter"
+	"github.com/yenst/tuinear/internal/issuefilter"
 )
 
 func TestIssueFilterPreferencesRoundTripAndIsolateProfiles(t *testing.T) {

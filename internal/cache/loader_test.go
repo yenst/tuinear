@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jihmy/tuinear/internal/issuefilter"
-	"github.com/jihmy/tuinear/internal/linear"
+	"github.com/yenst/tuinear/internal/issuefilter"
+	"github.com/yenst/tuinear/internal/linear"
 )
 
 type remoteStub struct {

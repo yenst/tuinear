@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 func Open(path string) (*Store, error) {
 	path = strings.TrimSpace(path)
@@ -177,6 +177,45 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit cache migration: %w", err)
 		}
+		version = 5
+	}
+	if version == 5 {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin cache migration: %w", err)
+		}
+		defer tx.Rollback()
+		var hasBranchName bool
+		rows, err := tx.QueryContext(ctx, "PRAGMA table_info(issues)")
+		if err != nil {
+			return fmt.Errorf("inspect cached issues: %w", err)
+		}
+		for rows.Next() {
+			var cid, notNull, primaryKey int
+			var name, columnType string
+			var defaultValue any
+			if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+				rows.Close()
+				return fmt.Errorf("inspect cached issue column: %w", err)
+			}
+			if name == "branch_name" {
+				hasBranchName = true
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("inspect cached issues: %w", err)
+		}
+		if !hasBranchName {
+			if _, err := tx.ExecContext(ctx, "ALTER TABLE issues ADD COLUMN branch_name TEXT NOT NULL DEFAULT ''"); err != nil {
+				return fmt.Errorf("add issue branch name: %w", err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 6"); err != nil {
+			return fmt.Errorf("set cache schema version: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit cache migration: %w", err)
+		}
 	}
 	for _, query := range schemaValidationQueries {
 		rows, err := db.QueryContext(ctx, query)
@@ -244,6 +283,7 @@ var schemaStatements = []string{
         description TEXT NOT NULL,
         priority INTEGER NOT NULL,
         url TEXT NOT NULL,
+        branch_name TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         state_id TEXT NOT NULL,
@@ -283,7 +323,7 @@ var schemaValidationQueries = []string{
 	"SELECT account_key, id, name, display_name FROM users LIMIT 0",
 	"SELECT account_key, id, name FROM projects LIMIT 0",
 	"SELECT account_key, team_id, project_id, position FROM team_projects LIMIT 0",
-	"SELECT account_key, id, identifier, title, description, priority, url, created_at, updated_at, state_id, assignee_id, team_id, project_id, position FROM issues LIMIT 0",
+	"SELECT account_key, id, identifier, title, description, priority, url, branch_name, created_at, updated_at, state_id, assignee_id, team_id, project_id, position FROM issues LIMIT 0",
 	"SELECT account_key, id, name, color FROM labels LIMIT 0",
 	"SELECT account_key, label_id, position FROM workspace_labels LIMIT 0",
 	"SELECT account_key, team_id, label_id, position FROM team_labels LIMIT 0",

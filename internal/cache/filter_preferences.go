@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jihmy/tuinear/internal/issuefilter"
+	"github.com/yenst/tuinear/internal/issuefilter"
 )
 
 func (s *Store) LoadIssueFilters(ctx context.Context, profileKey string) (issuefilter.State, error) {
