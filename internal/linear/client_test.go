@@ -265,6 +265,74 @@ func TestUpdateIssueSendsMutationAndReturnsCanonicalIssue(t *testing.T) {
 	}
 }
 
+func TestCreateIssueSendsMutationAndReturnsCanonicalIssue(t *testing.T) {
+	priority := 2
+	doer := httpDoerFunc(func(r *http.Request) (*http.Response, error) {
+		var request graphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(request.Query, "issueCreate") || strings.Contains(request.Query, "issueUpdate") {
+			t.Fatalf("request is not an issueCreate mutation: %s", request.Query)
+		}
+		input, ok := request.Variables["input"].(map[string]any)
+		if !ok || input["teamId"] != "team-1" || input["title"] != "New ticket" ||
+			input["description"] != "# Context\nDetails" || input["stateId"] != "state-2" ||
+			input["priority"] != float64(2) || input["assigneeId"] != "user-1" ||
+			input["projectId"] != "project-1" {
+			t.Fatalf("mutation input = %#v", request.Variables["input"])
+		}
+		labelIDs, ok := input["labelIds"].([]any)
+		if !ok || len(labelIDs) != 2 || labelIDs[0] != "label-1" || labelIDs[1] != "label-2" {
+			t.Fatalf("mutation labels = %#v", input["labelIds"])
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{"data":{"issueCreate":{"success":true,"issue":{
+              "id":"issue-2","identifier":"ENG-2","title":"Canonical ticket","description":"",
+              "priority":0,"url":"https://linear.app/acme/issue/ENG-2","createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:00:00Z","state":{"id":"state-1","name":"Todo","type":"unstarted"},
+              "assignee":null,"team":{"id":"team-1","key":"ENG","name":"Engineering"},"project":null,
+              "labels":{"nodes":[{"id":"label-1","name":"bug","color":"#f00"}]}
+            }}}}`)),
+		}, nil
+	})
+	issue, err := NewClient("token", WithHTTPClient(doer)).CreateIssue(t.Context(), IssueCreate{
+		TeamID: " team-1 ", Title: "  New ticket  ", Description: "# Context\nDetails",
+		StateID: " state-2 ", Priority: &priority, AssigneeID: " user-1 ", ProjectID: " project-1 ",
+		LabelIDs: []string{" label-1 ", "label-2", "label-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if issue.ID != "issue-2" || issue.Title != "Canonical ticket" || len(issue.Labels) != 1 {
+		t.Fatalf("created issue = %#v", issue)
+	}
+}
+
+func TestCreateIssueRejectsInvalidAndUnconfirmedCreation(t *testing.T) {
+	invalidPriority := 5
+	for _, create := range []IssueCreate{
+		{Title: "Ticket"},
+		{TeamID: "team-1"},
+		{TeamID: "team-1", Title: "Ticket", Priority: &invalidPriority},
+		{TeamID: "team-1", Title: "Ticket", LabelIDs: []string{" "}},
+	} {
+		if _, err := NewClient("token").CreateIssue(t.Context(), create); err == nil {
+			t.Fatalf("invalid creation was accepted: %#v", create)
+		}
+	}
+	doer := httpDoerFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(
+			`{"data":{"issueCreate":{"success":false,"issue":null}}}`,
+		))}, nil
+	})
+	if _, err := NewClient("token", WithHTTPClient(doer)).CreateIssue(t.Context(), IssueCreate{TeamID: "team-1", Title: "Ticket"}); err == nil || !strings.Contains(err.Error(), "did not confirm") {
+		t.Fatalf("unconfirmed creation error = %v", err)
+	}
+}
+
 func TestUpdateIssueRejectsInvalidAndUnconfirmedUpdates(t *testing.T) {
 	title := "New title"
 	priorityBelowRange := -1

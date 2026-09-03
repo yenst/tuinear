@@ -54,6 +54,7 @@ func helpColumns(width int) ([]string, []string) {
 	}
 	right := []string{
 		accentStyle.Bold(true).Render("Ticket actions"),
+		helpBinding("n", "create ticket", width),
 		helpBinding("enter", "all actions", width),
 		helpBinding("e / s / p", "title / status / priority", width),
 		helpBinding("u / P / l", "assignee / project / labels", width),

@@ -16,6 +16,10 @@ type remoteStub struct {
 	err        error
 	fetches    int
 	updated    linear.Issue
+	created    linear.Issue
+	createErr  error
+	creates    int
+	create     linear.IssueCreate
 	updateErr  error
 	updates    int
 	archiveErr error
@@ -23,6 +27,12 @@ type remoteStub struct {
 	archivedID string
 	selectedID string
 	selectErr  error
+}
+
+func (s *remoteStub) CreateIssue(_ context.Context, create linear.IssueCreate) (linear.Issue, error) {
+	s.creates++
+	s.create = create
+	return s.created, s.createErr
 }
 
 func (s *remoteStub) SelectAccount(accountID string) error {
@@ -81,6 +91,46 @@ func TestLoaderReadsCacheBeforeRemoteAndSynchronizes(t *testing.T) {
 	stored, storedAt, err := store.Load(t.Context(), "work")
 	if err != nil || stored.Organization.Name != "Fresh" || !storedAt.Equal(cachedAt.Add(time.Hour)) {
 		t.Fatalf("synchronized cache = %#v at %v, %v", stored.Organization, storedAt, err)
+	}
+}
+
+func TestLoaderCreateIssueCachesCanonicalIssue(t *testing.T) {
+	store := openTestStore(t)
+	dashboard := demoDashboard(t)
+	if err := store.Save(t.Context(), "work", dashboard, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	created := dashboard.Issues[0]
+	created.ID = "created-1"
+	created.Identifier = "ENG-99"
+	created.Title = "Canonical title"
+	remote := &remoteStub{created: created}
+	loader := NewLoader(store, remote, func() (string, error) { return "work", nil })
+
+	got, err := loader.CreateIssue(t.Context(), linear.IssueCreate{TeamID: created.Team.ID, Title: "Draft title"})
+	if err != nil || got.ID != created.ID || remote.creates != 1 || remote.create.Title != "Draft title" {
+		t.Fatalf("CreateIssue = %#v, %v, calls=%d input=%#v", got, err, remote.creates, remote.create)
+	}
+	cached, _, err := store.Load(t.Context(), "work")
+	if err != nil || len(cached.Issues) != len(dashboard.Issues)+1 || cached.Issues[0].ID != created.ID {
+		t.Fatalf("cached creation = issues=%#v err=%v", cached.Issues, err)
+	}
+}
+
+func TestLoaderCreateIssueFailureLeavesCacheUnchanged(t *testing.T) {
+	store := openTestStore(t)
+	dashboard := demoDashboard(t)
+	if err := store.Save(t.Context(), "work", dashboard, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	remote := &remoteStub{createErr: errors.New("forbidden")}
+	loader := NewLoader(store, remote, func() (string, error) { return "work", nil })
+	if _, err := loader.CreateIssue(t.Context(), linear.IssueCreate{TeamID: dashboard.Teams[0].ID, Title: "Draft"}); err == nil {
+		t.Fatal("CreateIssue succeeded unexpectedly")
+	}
+	cached, _, err := store.Load(t.Context(), "work")
+	if err != nil || len(cached.Issues) != len(dashboard.Issues) {
+		t.Fatalf("cache changed after failure: issues=%d err=%v", len(cached.Issues), err)
 	}
 }
 

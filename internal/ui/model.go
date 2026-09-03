@@ -34,6 +34,10 @@ type IssueUpdater interface {
 	UpdateIssue(context.Context, string, linear.IssueUpdate) (linear.Issue, error)
 }
 
+type IssueCreator interface {
+	CreateIssue(context.Context, linear.IssueCreate) (linear.Issue, error)
+}
+
 type dashboardLoadedMsg struct{ dashboard linear.Dashboard }
 type dashboardFailedMsg struct{ err error }
 type cachedDashboardLoadedMsg struct {
@@ -92,14 +96,17 @@ type Model struct {
 	clipboardErr             error
 	clipboardNotice          string
 	issueUpdater             IssueUpdater
+	issueCreator             IssueCreator
 	issueArchiver            IssueArchiver
 	editor                   *titleEditor
+	createEditor             *createIssueEditor
 	choiceEditor             *choiceEditor
 	labelEditor              *labelEditor
 	descriptionEditor        *descriptionEditor
 	archiveConfirm           *archiveConfirmation
 	actionMenu               *actionMenu
 	pendingEdit              *pendingIssueEdit
+	pendingCreate            *pendingIssueCreate
 	pendingArchive           *pendingIssueArchive
 	editErr                  error
 	filterStore              IssueFilterStore
@@ -114,6 +121,9 @@ func New(loader DashboardLoader) Model {
 	m := Model{loader: loader, width: 120, height: 34, loading: true, browserOpen: browser.Open, clipboardSet: tea.SetClipboard}
 	if updater, ok := loader.(IssueUpdater); ok {
 		m.issueUpdater = updater
+	}
+	if creator, ok := loader.(IssueCreator); ok {
+		m.issueCreator = creator
 	}
 	if archiver, ok := loader.(IssueArchiver); ok {
 		m.issueArchiver = archiver
@@ -136,6 +146,15 @@ func NewWithDashboardAndUpdater(dashboard linear.Dashboard, updater IssueUpdater
 	if archiver, ok := updater.(IssueArchiver); ok {
 		m.issueArchiver = archiver
 	}
+	if creator, ok := updater.(IssueCreator); ok {
+		m.issueCreator = creator
+	}
+	return m
+}
+
+func NewWithDashboardAndCreator(dashboard linear.Dashboard, creator IssueCreator) Model {
+	m := NewWithDashboard(dashboard)
+	m.issueCreator = creator
 	return m
 }
 
@@ -180,6 +199,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncIssueFilterProfile()
 		m.rebaseOpenEditors()
 		m.rebasePendingIssueEdit()
+		m.rebasePendingIssueCreate()
 		m.fromCache = false
 		m.cachedAt = time.Time{}
 		m.refreshing = false
@@ -188,6 +208,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cachedDashboardLoadedMsg:
 		m.applyDashboard(msg.dashboard)
 		m.syncIssueFilterProfile()
+		m.rebasePendingIssueCreate()
 		m.fromCache = true
 		m.cachedAt = msg.cachedAt
 		m.refreshing = true
@@ -204,6 +225,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncIssueFilterProfile()
 		m.rebaseOpenEditors()
 		m.rebasePendingIssueEdit()
+		m.rebasePendingIssueCreate()
 		m.cachedAt = msg.cachedAt
 		m.fromCache = !msg.cachedAt.IsZero()
 		m.refreshing = m.fromCache
@@ -249,6 +271,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case issueUpdateFailedMsg:
 		m.rollbackIssueEdit(msg.issueID, msg.err)
 		return m, nil
+	case issueCreatedMsg:
+		m.finishIssueCreate(msg.issue)
+		return m, nil
+	case issueCreateFailedMsg:
+		m.failIssueCreate(msg.temporaryID, msg.err)
+		return m, nil
 	case issueArchivedMsg:
 		m.finishIssueArchive(msg.issueID)
 		return m, nil
@@ -267,6 +295,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.editor != nil {
 			return m, m.updateTitleEditor(msg)
+		}
+		if m.createEditor != nil {
+			return m, m.updateCreateIssueEditor(msg)
 		}
 		if m.choiceEditor != nil {
 			return m, m.updateChoiceEditor(msg)
@@ -289,7 +320,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.pendingArchive != nil {
+		if m.pendingArchive != nil || m.pendingCreate != nil {
 			return m, nil
 		}
 		if m.palette {
@@ -303,7 +334,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case keyMatches(msg, "q"):
 			return m, tea.Quit
 		case keyMatches(msg, "r"):
-			if m.pendingEdit != nil {
+			if m.pendingEdit != nil || m.pendingCreate != nil {
 				return m, nil
 			}
 			m.err = nil
@@ -315,12 +346,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, loadDashboard(m.loader)
 		case keyMatches(msg, "a"):
-			if m.pendingEdit != nil {
+			if m.pendingEdit != nil || m.pendingCreate != nil {
 				return m, nil
 			}
 			return m, m.cycleAccount(1)
 		case keyMatches(msg, "A", "shift+a"):
-			if m.pendingEdit != nil {
+			if m.pendingEdit != nil || m.pendingCreate != nil {
 				return m, nil
 			}
 			return m, m.cycleAccount(-1)
@@ -335,6 +366,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.openSelectedIssue()
 		case keyMatches(msg, "enter", "return"):
 			m.beginIssueActions()
+		case keyMatches(msg, "n"):
+			m.beginIssueCreate()
 		case keyMatches(msg, "e"):
 			m.beginTitleEdit()
 		case keyMatches(msg, "s"):

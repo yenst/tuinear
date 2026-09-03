@@ -28,6 +28,9 @@ field editing and recoverable issue archiving.
 - Press `G` while browsing to copy the selected issue's suggested git branch name
 - Press `c` while browsing to copy the selected issue's Linear URL
 - Press `enter` to discover every action available for the selected issue
+- Create a complete ticket in the selected team with `n`, including title,
+  description, status, priority, assignee, project, and labels, with optimistic
+  feedback and a retryable failure state
 - Edit the selected issue's title with `e`, including optimistic feedback and exact rollback on failure
 - Change the selected issue's team-specific status with `s`
 - Change the selected issue's priority with `p`
@@ -146,6 +149,7 @@ go run ./cmd/tuinear --snapshot
 | `shift+tab` / `[` | Previous team |
 | `a` / `A` | Next/previous account |
 | `enter` | Open the selected issue's action menu |
+| `n` | Create a ticket in the selected team (`j/k` fields, `enter` edit, `ctrl+s` create) |
 | `c` | Copy the selected issue's Linear URL |
 | `e` | Edit the selected issue's title |
 | `s` | Change the selected issue's status |

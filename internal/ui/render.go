@@ -29,6 +29,8 @@ func (m Model) render() string {
 		body = centeredState(width, bodyHeight, "Could not load Linear", m.err.Error()+"  ·  press r to retry")
 	case m.editor != nil:
 		body = m.renderTitleEditor(width, bodyHeight)
+	case m.createEditor != nil:
+		body = m.renderCreateIssueEditor(width, bodyHeight)
 	case m.choiceEditor != nil:
 		body = m.renderChoiceEditor(width, bodyHeight)
 	case m.labelEditor != nil:
@@ -75,7 +77,9 @@ func (m Model) renderHeader(width int) string {
 		account = workspace + " / " + viewer
 	}
 	mode := mutedStyle.Render("browse + edit")
-	if m.pendingEdit != nil {
+	if m.pendingCreate != nil {
+		mode = lipgloss.NewStyle().Foreground(theme.yellow).Render("creating ticket…")
+	} else if m.pendingEdit != nil {
 		mode = lipgloss.NewStyle().Foreground(theme.yellow).Render("saving " + m.pendingEdit.identifier + "…")
 	} else if m.pendingArchive != nil {
 		mode = lipgloss.NewStyle().Foreground(theme.yellow).Render("archiving " + m.pendingArchive.identifier + "…")
@@ -223,6 +227,20 @@ func (m Model) renderFooter(width int) string {
 		help := "enter save  ·  esc cancel  ·  ctrl+u clear  ·  ←/→ move"
 		return footer(help)
 	}
+	if m.createEditor != nil {
+		switch m.createEditor.mode {
+		case createEditTitle:
+			return footer("enter done  ·  esc back  ·  ctrl+u clear  ·  ←/→ move")
+		case createEditDescription:
+			return footer("ctrl+s done  ·  esc back  ·  enter newline  ·  arrows move  ·  ctrl+u clear")
+		case createEditChoice:
+			return footer("enter choose  ·  esc back  ·  j/k or arrows move")
+		case createEditLabels:
+			return footer("space toggle  ·  enter apply  ·  esc back  ·  j/k or arrows move")
+		default:
+			return footer("enter edit  ·  ctrl+s create  ·  esc cancel  ·  j/k or tab move")
+		}
+	}
 	if m.choiceEditor != nil {
 		help := "enter save  ·  esc cancel  ·  j/k or arrows choose " + m.choiceEditor.field
 		return footer(help)
@@ -248,7 +266,7 @@ func (m Model) renderFooter(width int) string {
 		return footer(help)
 	}
 	if m.editErr != nil {
-		help := "Action: " + m.editErr.Error() + "  ·  retry with e/s/p/u/P/l/d/x"
+		help := "Action: " + m.editErr.Error() + "  ·  retry with n/e/s/p/u/P/l/d/x"
 		return lipgloss.NewStyle().Foreground(theme.red).Width(width).Padding(0, 1).Render(clip(help, max(1, width-2)))
 	}
 	if m.browserErr != nil {
@@ -268,5 +286,5 @@ func (m Model) renderFooter(width int) string {
 	if m.refreshErr != nil {
 		return footer("Refresh: " + m.refreshErr.Error() + "  ·  r retry  ·  a/A account  ·  h help")
 	}
-	return footer("h help  ·  enter actions  ·  / search  ·  f filters  ·  G branch  ·  c URL  ·  q quit")
+	return footer("h help  ·  n new ticket  ·  enter actions  ·  / search  ·  f filters  ·  q quit")
 }

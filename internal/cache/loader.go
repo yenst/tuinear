@@ -30,6 +30,10 @@ type IssueUpdater interface {
 	UpdateIssue(context.Context, string, linear.IssueUpdate) (linear.Issue, error)
 }
 
+type IssueCreator interface {
+	CreateIssue(context.Context, linear.IssueCreate) (linear.Issue, error)
+}
+
 type IssueArchiver interface {
 	ArchiveIssue(context.Context, string) error
 }
@@ -183,6 +187,40 @@ func (l *Loader) UpdateIssue(ctx context.Context, issueID string, update linear.
 			break
 		}
 	}
+	return issue, nil
+}
+
+func (l *Loader) CreateIssue(ctx context.Context, create linear.IssueCreate) (linear.Issue, error) {
+	if l == nil || l.remote == nil {
+		return linear.Issue{}, errors.New("cached dashboard loader is not configured")
+	}
+	l.remoteMu.Lock()
+	defer l.remoteMu.Unlock()
+	creator, ok := l.remote.(IssueCreator)
+	if !ok {
+		return linear.Issue{}, errors.New("issue creation is not configured")
+	}
+	issue, err := creator.CreateIssue(ctx, create)
+	if err != nil {
+		return linear.Issue{}, err
+	}
+	key, err := l.cacheKey()
+	if err != nil {
+		return issue, nil
+	}
+	dashboard, _, err := l.store.Load(ctx, key)
+	if err != nil {
+		return issue, nil
+	}
+	issues := make([]linear.Issue, 0, len(dashboard.Issues)+1)
+	issues = append(issues, issue)
+	for _, cached := range dashboard.Issues {
+		if cached.ID != issue.ID {
+			issues = append(issues, cached)
+		}
+	}
+	dashboard.Issues = issues
+	l.saveBestEffort(ctx, dashboard)
 	return issue, nil
 }
 

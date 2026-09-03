@@ -61,6 +61,20 @@ const issueUpdateMutation = `mutation TuinearIssueUpdate($id: String!, $input: I
   }
 }`
 
+const issueCreateMutation = `mutation TuinearIssueCreate($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    success
+    issue {
+      id identifier title description priority url branchName createdAt updatedAt
+      state { id name type color }
+      assignee { id name displayName }
+      team { id key name }
+      project { id name }
+      labels { nodes { id name color } }
+    }
+  }
+}`
+
 const issueArchiveMutation = `mutation TuinearIssueArchive($id: String!) {
   issueArchive(id: $id) { success }
 }`
@@ -289,6 +303,50 @@ func (c *Client) UpdateIssue(ctx context.Context, issueID string, update IssueUp
 	}
 	decoded.IssueUpdate.Issue.Normalize()
 	return decoded.IssueUpdate.Issue, nil
+}
+
+func (c *Client) CreateIssue(ctx context.Context, create IssueCreate) (Issue, error) {
+	create.TeamID = strings.TrimSpace(create.TeamID)
+	create.Title = strings.TrimSpace(create.Title)
+	create.StateID = strings.TrimSpace(create.StateID)
+	create.AssigneeID = strings.TrimSpace(create.AssigneeID)
+	create.ProjectID = strings.TrimSpace(create.ProjectID)
+	if create.TeamID == "" {
+		return Issue{}, errors.New("Linear team ID is empty")
+	}
+	if create.Title == "" {
+		return Issue{}, errors.New("Linear issue title cannot be empty")
+	}
+	if create.Priority != nil && (*create.Priority < 0 || *create.Priority > 4) {
+		return Issue{}, errors.New("Linear issue priority must be between 0 and 4")
+	}
+	seenLabels := make(map[string]bool, len(create.LabelIDs))
+	labelIDs := make([]string, 0, len(create.LabelIDs))
+	for _, value := range create.LabelIDs {
+		labelID := strings.TrimSpace(value)
+		if labelID == "" {
+			return Issue{}, errors.New("Linear label ID cannot be empty")
+		}
+		if !seenLabels[labelID] {
+			seenLabels[labelID] = true
+			labelIDs = append(labelIDs, labelID)
+		}
+	}
+	create.LabelIDs = labelIDs
+	var decoded struct {
+		IssueCreate struct {
+			Success bool  `json:"success"`
+			Issue   Issue `json:"issue"`
+		} `json:"issueCreate"`
+	}
+	if err := c.graphQL(ctx, issueCreateMutation, map[string]any{"input": create}, &decoded); err != nil {
+		return Issue{}, err
+	}
+	if !decoded.IssueCreate.Success || decoded.IssueCreate.Issue.ID == "" {
+		return Issue{}, errors.New("Linear did not confirm the issue creation")
+	}
+	decoded.IssueCreate.Issue.Normalize()
+	return decoded.IssueCreate.Issue, nil
 }
 
 func (c *Client) ArchiveIssue(ctx context.Context, issueID string) error {

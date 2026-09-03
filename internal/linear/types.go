@@ -197,6 +197,19 @@ type IssueUpdate struct {
 	LabelIDs    *[]string `json:"labelIds,omitempty"`
 }
 
+// IssueCreate contains the fields supported by Tuinear's creation form.
+// Pointer priority preserves an explicit "no priority" value (zero).
+type IssueCreate struct {
+	TeamID      string   `json:"teamId"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	StateID     string   `json:"stateId,omitempty"`
+	Priority    *int     `json:"priority,omitempty"`
+	AssigneeID  string   `json:"assigneeId,omitempty"`
+	ProjectID   string   `json:"projectId,omitempty"`
+	LabelIDs    []string `json:"labelIds,omitempty"`
+}
+
 func (i *Issue) Normalize() {
 	if len(i.Labels) == 0 && len(i.LabelData.Nodes) > 0 {
 		i.Labels = append([]Label(nil), i.LabelData.Nodes...)

@@ -9,6 +9,95 @@ import (
 
 type DemoClient struct{}
 
+func (DemoClient) CreateIssue(_ context.Context, create IssueCreate) (Issue, error) {
+	dashboard := demoDashboard("demo-work")
+	create.TeamID = strings.TrimSpace(create.TeamID)
+	create.Title = strings.TrimSpace(create.Title)
+	if create.Title == "" {
+		return Issue{}, fmt.Errorf("issue title cannot be empty")
+	}
+	for _, team := range dashboard.Teams {
+		if team.ID != create.TeamID {
+			continue
+		}
+		states := dashboard.StatesForTeam(team.ID)
+		if len(states) == 0 {
+			return Issue{}, fmt.Errorf("demo team %q has no workflow states", team.ID)
+		}
+		state := states[0]
+		if create.StateID != "" {
+			found := false
+			for _, candidate := range states {
+				if candidate.ID == strings.TrimSpace(create.StateID) {
+					state = candidate
+					found = true
+					break
+				}
+			}
+			if !found {
+				return Issue{}, fmt.Errorf("unknown demo workflow state %q", create.StateID)
+			}
+		}
+		priority := 0
+		if create.Priority != nil {
+			if *create.Priority < 0 || *create.Priority > 4 {
+				return Issue{}, fmt.Errorf("issue priority must be between 0 and 4")
+			}
+			priority = *create.Priority
+		}
+		var assignee *User
+		if create.AssigneeID != "" {
+			for _, user := range dashboard.Users {
+				if user.ID == strings.TrimSpace(create.AssigneeID) {
+					selected := user
+					assignee = &selected
+					break
+				}
+			}
+			if assignee == nil {
+				return Issue{}, fmt.Errorf("unknown demo assignee %q", create.AssigneeID)
+			}
+		}
+		var project *Project
+		if create.ProjectID != "" {
+			for _, candidate := range dashboard.ProjectsForTeam(team.ID) {
+				if candidate.ID == strings.TrimSpace(create.ProjectID) {
+					selected := candidate
+					project = &selected
+					break
+				}
+			}
+			if project == nil {
+				return Issue{}, fmt.Errorf("unknown demo project %q", create.ProjectID)
+			}
+		}
+		availableLabels := dashboard.LabelsForTeam(team.ID)
+		labels := make([]Label, 0, len(create.LabelIDs))
+		for _, labelID := range create.LabelIDs {
+			found := false
+			for _, candidate := range availableLabels {
+				if candidate.ID == strings.TrimSpace(labelID) {
+					labels = append(labels, candidate)
+					found = true
+					break
+				}
+			}
+			if !found {
+				return Issue{}, fmt.Errorf("unknown demo label %q", labelID)
+			}
+		}
+		now := time.Now()
+		return Issue{
+			ID: "demo-created", Identifier: team.Key + "-NEW", Title: create.Title,
+			Description: create.Description, Priority: priority,
+			Team: team, State: state, Assignee: assignee, Project: project, Labels: labels,
+			CreatedAt: now, UpdatedAt: now,
+			URL: "https://linear.app/demo/issue/" + team.Key + "-NEW",
+		}, nil
+	}
+	return Issue{}, fmt.Errorf("unknown demo team %q", create.TeamID)
+}
+
 func (DemoClient) FetchDashboard(context.Context) (Dashboard, error) {
 	return demoDashboard("demo-work"), nil
 }
