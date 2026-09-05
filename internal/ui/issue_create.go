@@ -204,8 +204,6 @@ func (m *Model) finishIssueCreate(issue linear.Issue) {
 	}
 	m.pendingCreate = nil
 	m.editErr = nil
-	m.fromCache = false
-	m.cachedAt = time.Time{}
 	m.filterIssues()
 	for index := range m.issues {
 		if m.issues[index].ID == issue.ID {

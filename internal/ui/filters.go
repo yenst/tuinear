@@ -169,6 +169,8 @@ func (m *Model) updatePalette(msg tea.KeyPressMsg) tea.Cmd {
 		m.palette = false
 		return nil
 	}
+	// A background refresh can remove options while the palette is open.
+	m.paletteIdx = clamp(m.paletteIdx, 0, len(options)-1)
 	switch msg.String() {
 	case "esc":
 		m.palette = false

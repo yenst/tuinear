@@ -172,21 +172,15 @@ func (l *Loader) UpdateIssue(ctx context.Context, issueID string, update linear.
 	if err != nil {
 		return linear.Issue{}, err
 	}
-	key, err := l.cacheKey()
-	if err != nil {
-		return issue, nil
-	}
-	dashboard, _, err := l.store.Load(ctx, key)
-	if err != nil {
-		return issue, nil
-	}
-	for index := range dashboard.Issues {
-		if dashboard.Issues[index].ID == issue.ID {
-			dashboard.Issues[index] = issue
-			l.saveBestEffort(ctx, dashboard)
-			break
+	l.updateCachedIssues(ctx, func(issues []linear.Issue) []linear.Issue {
+		for index := range issues {
+			if issues[index].ID == issue.ID {
+				issues[index] = issue
+				break
+			}
 		}
-	}
+		return issues
+	})
 	return issue, nil
 }
 
@@ -204,23 +198,16 @@ func (l *Loader) CreateIssue(ctx context.Context, create linear.IssueCreate) (li
 	if err != nil {
 		return linear.Issue{}, err
 	}
-	key, err := l.cacheKey()
-	if err != nil {
-		return issue, nil
-	}
-	dashboard, _, err := l.store.Load(ctx, key)
-	if err != nil {
-		return issue, nil
-	}
-	issues := make([]linear.Issue, 0, len(dashboard.Issues)+1)
-	issues = append(issues, issue)
-	for _, cached := range dashboard.Issues {
-		if cached.ID != issue.ID {
-			issues = append(issues, cached)
+	l.updateCachedIssues(ctx, func(cached []linear.Issue) []linear.Issue {
+		issues := make([]linear.Issue, 0, len(cached)+1)
+		issues = append(issues, issue)
+		for _, existing := range cached {
+			if existing.ID != issue.ID {
+				issues = append(issues, existing)
+			}
 		}
-	}
-	dashboard.Issues = issues
-	l.saveBestEffort(ctx, dashboard)
+		return issues
+	})
 	return issue, nil
 }
 
@@ -237,22 +224,15 @@ func (l *Loader) ArchiveIssue(ctx context.Context, issueID string) error {
 	if err := archiver.ArchiveIssue(ctx, issueID); err != nil {
 		return err
 	}
-	key, err := l.cacheKey()
-	if err != nil {
-		return nil
-	}
-	dashboard, _, err := l.store.Load(ctx, key)
-	if err != nil {
-		return nil
-	}
-	issues := dashboard.Issues[:0]
-	for _, issue := range dashboard.Issues {
-		if issue.ID != issueID {
-			issues = append(issues, issue)
+	l.updateCachedIssues(ctx, func(cached []linear.Issue) []linear.Issue {
+		issues := cached[:0]
+		for _, issue := range cached {
+			if issue.ID != issueID {
+				issues = append(issues, issue)
+			}
 		}
-	}
-	dashboard.Issues = issues
-	l.saveBestEffort(ctx, dashboard)
+		return issues
+	})
 	return nil
 }
 
@@ -306,4 +286,21 @@ func (l *Loader) saveBestEffort(ctx context.Context, dashboard linear.Dashboard)
 		now = l.now
 	}
 	_ = l.store.Save(ctx, key, dashboard, now())
+}
+
+// updateCachedIssues preserves the last full refresh time: confirming a single
+// mutation does not refresh the other tickets or workspace metadata. Callers
+// hold remoteMu so a refresh or account switch cannot interleave with this save.
+// Cache failures must not turn a confirmed remote mutation into a failed edit.
+func (l *Loader) updateCachedIssues(ctx context.Context, update func([]linear.Issue) []linear.Issue) {
+	key, err := l.cacheKey()
+	if err != nil {
+		return
+	}
+	dashboard, cachedAt, err := l.store.Load(ctx, key)
+	if err != nil {
+		return
+	}
+	dashboard.Issues = update(dashboard.Issues)
+	_ = l.store.Save(ctx, key, dashboard, cachedAt)
 }

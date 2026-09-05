@@ -119,8 +119,6 @@ func (m *Model) finishIssueArchive(issueID string) {
 	m.dashboard.Issues = issues
 	m.pendingArchive = nil
 	m.editErr = nil
-	m.fromCache = false
-	m.cachedAt = time.Time{}
 	m.filterIssues()
 }
 

@@ -26,6 +26,7 @@ empty states are handled.
 | [008](008-archive-and-delete.md) | DONE | Confirmed, recoverable issue archiving |
 | [010](010-interface-and-refresh-polish.md) | DONE | Compact help, reliable refresh/account switching, and terminal-native styling |
 | [011](011-issue-creation.md) | DONE | Optimistically create tickets in an explicitly selected team |
+| [012](012-code-quality-audit.md) | DONE | Focused code structure and safer refresh, account, filter, and cache state |
 
 The complete browsing and editing experience includes OAuth profiles, local
 search, filters, offline caching, browser links, guarded mutations, and

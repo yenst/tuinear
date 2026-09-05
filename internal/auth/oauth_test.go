@@ -345,6 +345,13 @@ func TestRedirectMustBeLoopback(t *testing.T) {
 	}
 }
 
+func TestRedirectRejectsPortZero(t *testing.T) {
+	_, err := validateRedirectURI("http://127.0.0.1:0/oauth/callback")
+	if err == nil {
+		t.Fatal("expected port zero to be rejected")
+	}
+}
+
 func response(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,

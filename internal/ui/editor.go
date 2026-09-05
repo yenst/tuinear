@@ -173,8 +173,6 @@ func (m *Model) finishIssueEdit(issue linear.Issue) {
 	m.replaceIssue(issue)
 	m.pendingEdit = nil
 	m.editErr = nil
-	m.fromCache = false
-	m.cachedAt = time.Time{}
 }
 
 func (m *Model) rollbackIssueEdit(issueID string, err error) {
